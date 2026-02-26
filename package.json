@@ -1,5 +1,5 @@
 {
-  "name": "nmt-system",
+  "name": "@ninebix/nmt-system",
   "version": "1.0.0",
   "description": "Neuron Merkle Tree - Verifiable Semantic Knowledge Graph System",
   "main": "dist/index.js",
