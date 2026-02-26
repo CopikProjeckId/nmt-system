@@ -1,0 +1,70 @@
+NINEBIX Source Available License (NSAL) v1.0
+
+================================================================================
+NINEBIX inc. (주식회사 나인빅스)
+Email   : sobdi90@9bix.com
+Website : https://9bix.com
+Corp ID : 476-86-03488
+================================================================================
+
+Copyright (c) 2024-2026 NINEBIX inc. All rights reserved.
+
+1. DEFINITIONS
+
+"Software" means the NMT (Neuron Merkle Tree) source code and associated documentation.
+"Commercial Use" means use for direct or indirect financial gain.
+"Derivative Work" means any modification, fork, or work based on the Software.
+
+2. PERMITTED USE
+
+You are granted a non-exclusive, non-transferable license to:
+- View, study, and learn from the source code
+- Use the Software for personal, non-commercial purposes
+- Create Derivative Works for non-commercial purposes
+- Distribute Derivative Works under this same license
+
+3. RESTRICTIONS
+
+You may NOT:
+- Use the Software or Derivative Works for Commercial Use without written permission
+- Remove or modify this license notice
+- Use the Software's patents without explicit patent license
+- Sublicense the Software under different terms
+
+4. COPYLEFT REQUIREMENT
+
+Any Derivative Work MUST:
+- Be distributed under this exact license (NSAL v1.0)
+- Include complete source code
+- Preserve all copyright notices
+- Clearly indicate modifications made
+
+5. PATENT GRANT
+
+Subject to the terms of this license, the copyright holder grants you a
+non-exclusive, worldwide, royalty-free patent license to make, use, and
+distribute the Software for non-commercial purposes only.
+
+6. COMMERCIAL LICENSING
+
+For Commercial Use, contact: sobdi90@9bix.com
+Commercial licenses are available exclusively from the copyright holder.
+
+7. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+8. TERMINATION
+
+This license terminates automatically if you violate any terms.
+Upon termination, you must destroy all copies of the Software.
+
+---
+
+Summary:
+✅ View/study source code
+✅ Personal/non-commercial use
+✅ Fork with same license (copyleft)
+✅ Patent protection
+❌ Commercial use without permission
+❌ Relicensing
