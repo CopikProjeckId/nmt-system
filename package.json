@@ -2,10 +2,27 @@
   "name": "@ninebix/nmt-system",
   "version": "1.0.0",
   "description": "Neuron Merkle Tree - Verifiable Semantic Knowledge Graph System",
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
   "type": "module",
   "bin": {
-    "nmt": "./bin/nmt.ts"
+    "nmt": "./dist/bin/nmt.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CopikProjeckId/nmt-system.git"
+  },
+  "homepage": "https://github.com/CopikProjeckId/nmt-system#readme",
+  "bugs": {
+    "url": "https://github.com/CopikProjeckId/nmt-system/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "scripts": {
     "build": "tsc",
