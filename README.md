@@ -231,7 +231,7 @@ nmt dimension set neuron-abc "감정" 0.8
 
 ```bash
 # Clone
-git clone https://github.com/ninebix/nmt-system.git
+git clone https://github.com/CopikProjeckId/nmt-system.git
 cd nmt-system
 
 # Install

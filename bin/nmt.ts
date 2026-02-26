@@ -38,7 +38,6 @@ Probabilistic Ontology (확률적 존재론):
   infer <sub>           Bidirectional inference (forward|backward|causal|bidirectional)
   attractor <sub>       Future attractor management (create|list|influence|path)
   learn <sub>           4-stage learning (interaction|patterns|outcomes|stats)
-  quantum <sub>         Probabilistic neurons (superpose|observe|evolve|entangle)
   dimension <sub>       Dynamic dimensions (list|expand|analyze|stats)
   sync <sub>            State synchronization (status|changes|export|import|peers)
 
@@ -71,8 +70,6 @@ Examples:
   nmt infer forward <neuron-id>           # Forward causation
   nmt infer backward <neuron-id>          # Abductive reasoning
   nmt attractor create "goal" --strength 0.8
-  nmt quantum superpose <neuron-id>       # Create superposition
-  nmt quantum observe <neuron-id>         # Collapse state
   nmt learn interaction --input "..." --output "..."
   nmt dimension expand --name "concept" --category "custom"
 `;
@@ -1105,43 +1102,6 @@ async function cmdLearnDispatch(args: string[], config: Config) {
   }
 }
 
-async function cmdQuantumDispatch(args: string[], config: Config) {
-  if (args.length === 0) {
-    console.log('Usage: nmt quantum <subcommand> [options]');
-    console.log('Subcommands: superpose, observe, evolve, entangle, interference, list');
-    return;
-  }
-
-  const ctx = await bootstrap(config);
-  if (!ctx.neuronManager) {
-    console.error('Error: Probabilistic neuron manager not available');
-    await shutdown();
-    process.exit(1);
-  }
-
-  try {
-    const { cmdQuantum } = await import('../src/cli/probabilistic-commands.js');
-    const result = await cmdQuantum(args, config, {
-      neuronStore: ctx.neuronStore,
-      neuronManager: ctx.neuronManager,
-    });
-
-    if (config.json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else if (result.success) {
-      console.log(result.data);
-    } else {
-      console.error(result.error);
-    }
-
-    await shutdown();
-  } catch (error: any) {
-    await shutdown();
-    console.error('Quantum failed:', error.message);
-    process.exit(1);
-  }
-}
-
 async function cmdDimensionDispatch(args: string[], config: Config) {
   if (args.length === 0) {
     console.log('Usage: nmt dimension <subcommand> [options]');
@@ -1313,9 +1273,6 @@ async function main() {
       break;
     case 'learn':
       await cmdLearnDispatch(args, config);
-      break;
-    case 'quantum':
-      await cmdQuantumDispatch(args, config);
       break;
     case 'dimension':
       await cmdDimensionDispatch(args, config);
