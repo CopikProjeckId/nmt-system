@@ -630,7 +630,8 @@ export class CLIDashboardServer {
    * Serve the dashboard-lite static files and configure SPA fallback.
    */
   private setupStaticFiles(): void {
-    const dashboardPath = path.join(__dirname, '../../dashboard-lite');
+    // From dist/src/api/ go up 3 levels to package root
+    const dashboardPath = path.join(__dirname, '../../../dashboard-lite');
 
     this.app.use(express.static(dashboardPath));
 
