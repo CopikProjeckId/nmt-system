@@ -57,6 +57,8 @@ interface SerializedNeuron {
     sourceTable?: string;
     sourceEngine?: string;
     sourceCharset?: string;
+    sourcePath?: string;
+    sourceName?: string;
   };
   outgoingSynapses: UUID[];
   incomingSynapses: UUID[];
@@ -141,6 +143,8 @@ export class NeuronStore {
     sourceTable?: string;
     sourceEngine?: string;
     sourceCharset?: string;
+    sourcePath?: string;
+    sourceName?: string;
   }): Promise<NeuronNode> {
     this.ensureInitialized();
 
@@ -166,6 +170,8 @@ export class NeuronStore {
         ...(input.sourceTable ? { sourceTable: input.sourceTable } : {}),
         ...(input.sourceEngine ? { sourceEngine: input.sourceEngine } : {}),
         ...(input.sourceCharset ? { sourceCharset: input.sourceCharset } : {}),
+        ...(input.sourcePath ? { sourcePath: input.sourcePath } : {}),
+        ...(input.sourceName ? { sourceName: input.sourceName } : {}),
       },
       outgoingSynapses: [],
       incomingSynapses: []

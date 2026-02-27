@@ -52,6 +52,8 @@ export interface CreateNeuronInput {
   sourceTable?: string;
   sourceEngine?: string;
   sourceCharset?: string;
+  sourcePath?: string;
+  sourceName?: string;
 }
 
 /**
@@ -100,6 +102,8 @@ export class NeuronGraphManager {
       sourceTable: input.sourceTable,
       sourceEngine: input.sourceEngine,
       sourceCharset: input.sourceCharset,
+      sourcePath: input.sourcePath,
+      sourceName: input.sourceName,
     });
 
     // Add to HNSW index

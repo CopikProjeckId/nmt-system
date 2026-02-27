@@ -159,6 +159,9 @@ export interface NeuronMetadata {
   sourceTable?: string;                       // 원본 테이블명
   sourceEngine?: string;                      // 원본 엔진 (InnoDB 등)
   sourceCharset?: string;                     // 원본 문자셋 (utf8mb4 등)
+  // File ingestion provenance
+  sourcePath?: string;                         // 원본 파일 절대 경로
+  sourceName?: string;                         // 원본 파일명 (basename)
 }
 
 /** Core neuron data structure */
@@ -318,6 +321,8 @@ export interface INeuronStore {
     sourceTable?: string;
     sourceEngine?: string;
     sourceCharset?: string;
+    sourcePath?: string;
+    sourceName?: string;
   }): Promise<NeuronNode>;
   putNeuron(neuron: NeuronNode): Promise<void>;
   getNeuron(id: UUID): Promise<NeuronNode | null>;
@@ -361,6 +366,13 @@ export interface IIndexStore {
 // Default Configuration
 // ============================================================================
 
+/**
+ * Default configuration values
+ *
+ * HNSW index: M=16, efConstruction=200, efSearch=50
+ * Embedding model: Xenova/all-MiniLM-L6-v2 (quantized, ~23 MB), 384 dimensions
+ * Approximate throughput: ~447 ms per document on CPU (varies by hardware)
+ */
 export const DEFAULT_CONFIG = {
   HNSW: {
     M: 16,

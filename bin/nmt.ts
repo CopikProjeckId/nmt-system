@@ -229,7 +229,7 @@ async function bootstrap(config: Config): Promise<NMTContext> {
     chunkEngine, merkleEngine, graphManager, chunkStore, embeddingProvider
   );
   const queryService = new QueryService(
-    graphManager, merkleEngine, chunkStore, neuronStore
+    graphManager, merkleEngine, chunkStore, neuronStore, embeddingProvider
   );
   const verifyService = new VerificationService(
     merkleEngine, chunkStore, neuronStore
@@ -518,6 +518,8 @@ async function cmdIngest(args: string[], config: Config) {
       sourceType: config.sourceType || 'file',
       tags,
       autoConnect: true,
+      sourcePath: filePath,
+      sourceName: fileName,
     });
 
     if (config.json) {

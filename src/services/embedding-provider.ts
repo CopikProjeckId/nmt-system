@@ -7,6 +7,7 @@
  * @module services/embedding-provider
  */
 
+import { createHash } from 'node:crypto';
 import type { Embedding384 } from '../types/index.js';
 
 /**
@@ -49,6 +50,8 @@ async function getPipeline(): Promise<any> {
 export class XenovaEmbeddingProvider implements IEmbeddingProvider {
   private ready: boolean = false;
   private initPromise: Promise<void> | null = null;
+  private cache = new Map<string, Embedding384>();
+  private readonly maxCacheSize = 1000;
 
   /**
    * Initialize the provider (lazy)
@@ -73,9 +76,26 @@ export class XenovaEmbeddingProvider implements IEmbeddingProvider {
   }
 
   /**
-   * Generate embedding for a single text
+   * Generate embedding for a single text (with SHA-256 cache)
    */
   async embed(text: string): Promise<Embedding384> {
+    const key = createHash('sha256').update(text).digest('hex');
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const embedding = await this._embed(text);
+
+    if (this.cache.size >= this.maxCacheSize) {
+      const firstKey = this.cache.keys().next().value as string;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, embedding);
+    return embedding;
+  }
+
+  /**
+   * Internal embedding computation (no cache)
+   */
+  private async _embed(text: string): Promise<Embedding384> {
     const pipe = await getPipeline();
     const output = await pipe(text, { pooling: 'mean', normalize: true });
 

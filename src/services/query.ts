@@ -16,6 +16,7 @@ import type {
 import { NeuronGraphManager } from '../core/neuron-graph.js';
 import { MerkleEngine } from '../core/merkle-engine.js';
 import { cosineSimilarity } from '../utils/similarity.js';
+import { DeterministicEmbeddingProvider } from './embedding-provider.js';
 
 /**
  * Query result with neuron and metadata
@@ -48,37 +49,6 @@ export interface QueryEmbeddingProvider {
 }
 
 /**
- * Default query embedding provider
- */
-class DefaultQueryEmbeddingProvider implements QueryEmbeddingProvider {
-  async embed(text: string): Promise<Embedding384> {
-    const embedding = new Float32Array(384);
-    let hash = 0;
-    for (let i = 0; i < text.length; i++) {
-      hash = ((hash << 5) - hash) + text.charCodeAt(i);
-      hash |= 0;
-    }
-
-    for (let i = 0; i < 384; i++) {
-      hash = ((hash << 5) - hash) + i;
-      hash |= 0;
-      embedding[i] = (hash % 1000) / 1000 - 0.5;
-    }
-
-    let norm = 0;
-    for (let i = 0; i < 384; i++) {
-      norm += embedding[i] * embedding[i];
-    }
-    norm = Math.sqrt(norm);
-    for (let i = 0; i < 384; i++) {
-      embedding[i] /= norm;
-    }
-
-    return embedding;
-  }
-}
-
-/**
  * Query Service for semantic search
  */
 export class QueryService {
@@ -99,7 +69,7 @@ export class QueryService {
     this.merkleEngine = merkleEngine;
     this.chunkStore = chunkStore;
     this.neuronStore = neuronStore;
-    this.embeddingProvider = embeddingProvider ?? new DefaultQueryEmbeddingProvider();
+    this.embeddingProvider = embeddingProvider ?? new DeterministicEmbeddingProvider();
   }
 
   /**

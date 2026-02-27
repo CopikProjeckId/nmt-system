@@ -22,6 +22,7 @@ import { MerkleEngine } from '../core/merkle-engine.js';
 import { NeuronGraphManager } from '../core/neuron-graph.js';
 import { generateUUID } from '../utils/uuid.js';
 import { now } from '../utils/index.js';
+import { DeterministicEmbeddingProvider } from './embedding-provider.js';
 
 /**
  * Ingestion job
@@ -58,6 +59,8 @@ export interface IngestionOptions {
   sourceTable?: string;
   sourceEngine?: string;
   sourceCharset?: string;
+  sourcePath?: string;
+  sourceName?: string;
 }
 
 /**
@@ -68,42 +71,7 @@ export interface EmbeddingProvider {
   embedBatch(texts: string[]): Promise<Embedding384[]>;
 }
 
-/**
- * Default embedding provider (placeholder - returns random embeddings)
- */
-class DefaultEmbeddingProvider implements EmbeddingProvider {
-  async embed(text: string): Promise<Embedding384> {
-    // Generate deterministic pseudo-random embedding from text
-    const embedding = new Float32Array(384);
-    let hash = 0;
-    for (let i = 0; i < text.length; i++) {
-      hash = ((hash << 5) - hash) + text.charCodeAt(i);
-      hash |= 0;
-    }
 
-    for (let i = 0; i < 384; i++) {
-      hash = ((hash << 5) - hash) + i;
-      hash |= 0;
-      embedding[i] = (hash % 1000) / 1000 - 0.5;
-    }
-
-    // Normalize
-    let norm = 0;
-    for (let i = 0; i < 384; i++) {
-      norm += embedding[i] * embedding[i];
-    }
-    norm = Math.sqrt(norm);
-    for (let i = 0; i < 384; i++) {
-      embedding[i] /= norm;
-    }
-
-    return embedding;
-  }
-
-  async embedBatch(texts: string[]): Promise<Embedding384[]> {
-    return Promise.all(texts.map(t => this.embed(t)));
-  }
-}
 
 /**
  * Ingestion Service
@@ -127,7 +95,7 @@ export class IngestionService {
     this.merkleEngine = merkleEngine;
     this.graphManager = graphManager;
     this.chunkStore = chunkStore;
-    this.embeddingProvider = embeddingProvider ?? new DefaultEmbeddingProvider();
+    this.embeddingProvider = embeddingProvider ?? new DeterministicEmbeddingProvider();
     this.jobs = new Map();
   }
 
@@ -214,6 +182,8 @@ export class IngestionService {
         sourceTable: options.sourceTable,
         sourceEngine: options.sourceEngine,
         sourceCharset: options.sourceCharset,
+        sourcePath: options.sourcePath,
+        sourceName: options.sourceName,
       });
 
       job.neuronId = neuron.id;
@@ -287,7 +257,7 @@ export class IngestionService {
       return false;
     }
 
-    job.status = 'FAILED';
+    job.status = 'CANCELLED';
     job.error = 'Cancelled by user';
     job.completedAt = now();
     return true;
@@ -378,6 +348,8 @@ export class IngestionService {
         sourceTable: options.sourceTable,
         sourceEngine: options.sourceEngine,
         sourceCharset: options.sourceCharset,
+        sourcePath: options.sourcePath,
+        sourceName: options.sourceName,
       });
 
       job.neuronId = neuron.id;

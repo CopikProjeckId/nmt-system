@@ -156,11 +156,14 @@ export class CLIDashboardServer {
       hnswIndex,
     });
 
+    const { getEmbeddingProvider } = await import('../services/embedding-provider.js');
+    const embeddingProvider = await getEmbeddingProvider();
+
     const ingestionService = new IngestionService(
-      chunkEngine, merkleEngine, graphManager, chunkStore
+      chunkEngine, merkleEngine, graphManager, chunkStore, embeddingProvider
     );
     const queryService = new QueryService(
-      graphManager, merkleEngine, chunkStore, neuronStore
+      graphManager, merkleEngine, chunkStore, neuronStore, embeddingProvider
     );
     const verifyService = new VerificationService(
       merkleEngine, chunkStore, neuronStore
