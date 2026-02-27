@@ -458,17 +458,25 @@ async function cmdMcp(config: Config) {
     const { NMTMCPServer } = await import('../src/mcp/server.js');
     const server = new NMTMCPServer(config.dataDir);
 
-    // Handle shutdown signals
+    // Initialize first
+    await server.init();
+
+    // Handle shutdown signals - properly close database connections
     const shutdown = async () => {
       console.error('\nShutting down MCP server...');
+      try {
+        await server.close();
+        console.error('MCP server closed gracefully.');
+      } catch (e) {
+        console.error('Error during shutdown:', e);
+      }
       process.exit(0);
     };
 
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
 
-    // Initialize and start
-    await server.init();
+    // Start server
     await server.start();
   } catch (error: any) {
     console.error('Failed to start MCP server:', error.message);
@@ -1448,7 +1456,21 @@ async function main() {
   }
 }
 
-main().catch(error => {
+// Global signal handlers for graceful shutdown
+process.on('SIGINT', async () => {
+  console.error('\nInterrupted. Closing databases...');
+  await shutdown();
+  process.exit(130);  // 128 + SIGINT(2)
+});
+
+process.on('SIGTERM', async () => {
+  console.error('\nTerminated. Closing databases...');
+  await shutdown();
+  process.exit(143);  // 128 + SIGTERM(15)
+});
+
+main().catch(async error => {
   console.error('Error:', error.message);
+  await shutdown();
   process.exit(1);
 });
