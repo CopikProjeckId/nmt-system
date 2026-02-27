@@ -5,13 +5,43 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NMT Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
   <script>
     tailwind.config = {
+      darkMode: 'class',
       theme: {
         extend: {
           fontFamily: {
-            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', 'monospace'],
+            roboto: ['Roboto', 'sans-serif'],
+            mono: ['Roboto Mono', 'ui-monospace', 'monospace'],
+          },
+          colors: {
+            md: {
+              primary: '#1976D2',
+              'primary-dark': '#1565C0',
+              'primary-light': '#42A5F5',
+              'on-primary': '#FFFFFF',
+              secondary: '#9C27B0',
+              surface: '#FFFFFF',
+              'surface-dark': '#1E1E1E',
+              'surface-variant': '#F5F5F5',
+              'surface-variant-dark': '#2D2D2D',
+              outline: '#E0E0E0',
+              'outline-dark': '#424242',
+              'on-surface': '#1C1B1F',
+              'on-surface-dark': '#E6E1E5',
+              error: '#B3261E',
+              success: '#2E7D32',
+            }
+          },
+          boxShadow: {
+            'md-1': '0 1px 2px rgba(0,0,0,0.3), 0 1px 3px 1px rgba(0,0,0,0.15)',
+            'md-2': '0 1px 2px rgba(0,0,0,0.3), 0 2px 6px 2px rgba(0,0,0,0.15)',
+            'md-3': '0 4px 8px 3px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.3)',
+            'md-4': '0 6px 10px 4px rgba(0,0,0,0.15), 0 2px 3px rgba(0,0,0,0.3)',
           }
         }
       }
@@ -19,490 +49,993 @@
   </script>
   <style>
     [x-cloak] { display: none !important; }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #f1f5f9; }
-    ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #BDBDBD; border-radius: 4px; }
+    .dark ::-webkit-scrollbar-thumb { background: #616161; }
+    ::-webkit-scrollbar-thumb:hover { background: #9E9E9E; }
+    .dark ::-webkit-scrollbar-thumb:hover { background: #757575; }
+    .material-icons-outlined { font-size: 24px; vertical-align: middle; }
+    .nav-item { transition: background-color 0.2s, color 0.2s; }
+    .nav-item:hover { background-color: rgba(25, 118, 210, 0.08); }
+    .dark .nav-item:hover { background-color: rgba(66, 165, 245, 0.12); }
+    .nav-item.active { background-color: rgba(25, 118, 210, 0.12); color: #1976D2; }
+    .dark .nav-item.active { background-color: rgba(66, 165, 245, 0.16); color: #42A5F5; }
+    .ripple { position: relative; overflow: hidden; }
+    .ripple::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle, rgba(255,255,255,0.3) 10%, transparent 10.01%); transform: scale(10); opacity: 0; transition: transform 0.5s, opacity 0.3s; }
+    .ripple:active::after { transform: scale(0); opacity: 0.3; transition: 0s; }
+    .card { transition: box-shadow 0.2s ease; }
+    .card:hover { box-shadow: 0 6px 10px 4px rgba(0,0,0,0.15), 0 2px 3px rgba(0,0,0,0.3); }
   </style>
 </head>
-<body class="bg-gray-100 min-h-screen" x-data="dashboard()" x-init="init()">
+<body class="font-roboto bg-md-surface-variant dark:bg-md-surface-dark min-h-screen transition-colors duration-300"
+      x-data="dashboard()" x-init="init()" :class="{ 'dark': darkMode }">
 
-  <!-- Header -->
-  <header class="bg-white border-b border-gray-200 shadow-sm">
-    <div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+  <!-- Top Navigation Bar -->
+  <header class="fixed top-0 left-0 right-0 z-50 bg-md-primary dark:bg-md-surface-dark shadow-md-2 h-16">
+    <div class="flex items-center h-full px-4">
+      <!-- Menu Toggle -->
+      <button @click="sidebarOpen = !sidebarOpen"
+              class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors mr-4">
+        <span class="material-icons-outlined text-white dark:text-md-on-surface-dark">menu</span>
+      </button>
+
+      <!-- Title -->
       <div class="flex items-center gap-3">
-        <h1 class="text-lg font-bold text-gray-900 tracking-tight">NMT Dashboard</h1>
-        <span class="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">v1.0</span>
+        <span class="material-icons-outlined text-white dark:text-md-primary-light">hub</span>
+        <h1 class="text-xl font-medium text-white dark:text-md-on-surface-dark tracking-wide">NMT Dashboard</h1>
+        <span class="text-xs font-medium bg-white/20 dark:bg-md-primary/30 text-white dark:text-md-primary-light px-2 py-0.5 rounded-full">v1.0.3</span>
       </div>
-      <div class="flex items-center gap-3">
-        <span x-show="connected" x-cloak class="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
-          <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-          Connected
-        </span>
-        <span x-show="!connected" class="flex items-center gap-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full">
-          <span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
-          Offline
-        </span>
+
+      <!-- Search Bar -->
+      <div class="flex-1 max-w-xl mx-8 hidden md:block">
+        <div class="relative">
+          <span class="material-icons-outlined absolute left-3 top-1/2 -translate-y-1/2 text-white/70 dark:text-gray-400 text-xl">search</span>
+          <input type="text"
+                 x-model="globalSearch"
+                 @keydown.enter="doGlobalSearch()"
+                 placeholder="Search neurons, content..."
+                 class="w-full bg-white/10 dark:bg-md-surface-variant-dark border-0 rounded-full pl-10 pr-4 py-2.5 text-sm text-white dark:text-md-on-surface-dark placeholder-white/60 dark:placeholder-gray-500 focus:bg-white/20 dark:focus:bg-md-surface-variant-dark focus:outline-none focus:ring-2 focus:ring-white/30 dark:focus:ring-md-primary transition-all">
+        </div>
+      </div>
+
+      <!-- Right Actions -->
+      <div class="flex items-center gap-2 ml-auto">
+        <!-- Connection Status -->
+        <div class="flex items-center gap-2 px-3 py-1.5 rounded-full"
+             :class="connected ? 'bg-md-success/20 dark:bg-md-success/30' : 'bg-md-error/20 dark:bg-md-error/30'">
+          <span class="w-2 h-2 rounded-full" :class="connected ? 'bg-md-success animate-pulse' : 'bg-md-error'"></span>
+          <span class="text-xs font-medium" :class="connected ? 'text-white dark:text-green-400' : 'text-white dark:text-red-400'"
+                x-text="connected ? 'Connected' : 'Offline'"></span>
+        </div>
+
+        <!-- Dark Mode Toggle -->
+        <button @click="toggleDarkMode()"
+                class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 dark:hover:bg-white/5 transition-colors">
+          <span x-show="!darkMode" class="material-icons-outlined text-white">dark_mode</span>
+          <span x-show="darkMode" x-cloak class="material-icons-outlined text-md-on-surface-dark">light_mode</span>
+        </button>
+
+        <!-- Refresh -->
+        <button @click="refreshAll()"
+                class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 dark:hover:bg-white/5 transition-colors">
+          <span class="material-icons-outlined text-white dark:text-md-on-surface-dark" :class="{ 'animate-spin': refreshing }">refresh</span>
+        </button>
       </div>
     </div>
   </header>
 
-  <!-- Tab Navigation -->
-  <nav class="bg-white border-b border-gray-200 overflow-x-auto">
-    <div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="flex gap-0 -mb-px">
-        <template x-for="tab in tabs" :key="tab.id">
-          <button
-            @click="switchTab(tab.id)"
-            :class="activeTab === tab.id
-              ? 'border-indigo-600 text-indigo-600 font-semibold'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium'"
-            class="px-3 py-3 text-sm border-b-2 transition-colors whitespace-nowrap"
-            x-text="tab.label"
-          ></button>
-        </template>
-      </div>
-    </div>
-  </nav>
+  <!-- Side Navigation -->
+  <aside :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:w-20'"
+         class="fixed left-0 top-16 bottom-0 z-40 w-64 bg-md-surface dark:bg-md-surface-dark shadow-md-2 transition-all duration-300 overflow-hidden">
+    <nav class="py-4 h-full overflow-y-auto">
+      <template x-for="item in navItems" :key="item.id">
+        <button @click="switchTab(item.id); if(window.innerWidth < 1024) sidebarOpen = false"
+                :class="{ 'active': activeTab === item.id }"
+                class="nav-item w-full flex items-center gap-4 px-6 py-3 text-md-on-surface dark:text-md-on-surface-dark">
+          <span class="material-icons-outlined" :class="activeTab === item.id ? 'text-md-primary dark:text-md-primary-light' : ''" x-text="item.icon"></span>
+          <span x-show="sidebarOpen" class="text-sm font-medium" x-text="item.label"></span>
+        </button>
+      </template>
 
-  <!-- Main Content Area -->
-  <main class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    </nav>
+  </aside>
 
-    <!-- TAB: OVERVIEW -->
-    <section x-show="activeTab === 'overview'" x-cloak>
-      <div class="flex items-center justify-between mb-5">
-        <h2 class="text-base font-semibold text-gray-900">System Overview</h2>
-        <span class="text-xs text-gray-400" x-text="lastRefresh ? 'Updated ' + lastRefresh : ''"></span>
-      </div>
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          <p class="text-2xl font-bold text-gray-900" x-text="formatNumber(stats.neurons ?? '--')"></p>
-          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Neurons</p>
-        </div>
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          <p class="text-2xl font-bold text-gray-900" x-text="formatNumber(stats.synapses ?? '--')"></p>
-          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Synapses</p>
-        </div>
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          <p class="text-2xl font-bold text-gray-900" x-text="formatNumber(stats.chunks?.total ?? '--')"></p>
-          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Chunks</p>
-        </div>
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          <p class="text-2xl font-bold text-gray-900" x-text="formatBytes(stats.chunks?.totalSize)"></p>
-          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Total Size</p>
-        </div>
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          <p class="text-2xl font-bold text-gray-900" x-text="formatNumber(stats.hnsw?.totalNodes ?? '--')"></p>
-          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">HNSW Vectors</p>
-        </div>
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          <p class="text-2xl font-bold text-gray-900" x-text="stats.hnsw?.maxLayer ?? '--'"></p>
-          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">HNSW Layers</p>
-        </div>
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          <p class="text-2xl font-bold text-gray-900" x-text="stats.storage?.backend ?? '--'"></p>
-          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Storage</p>
-        </div>
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          <p class="text-2xl font-bold text-gray-900" x-text="formatBytes(stats.chunks?.avgSize)"></p>
-          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Avg Chunk</p>
-        </div>
-      </div>
-      <div class="bg-white border border-gray-200 rounded-lg p-5">
-        <h3 class="text-sm font-semibold text-gray-700 mb-3">Data Directory</h3>
-        <p class="text-sm font-mono text-gray-900 break-all" x-text="stats.storage?.dataDir ?? '--'"></p>
-      </div>
-    </section>
+  <!-- Main Content -->
+  <main :class="sidebarOpen ? 'lg:ml-64' : 'lg:ml-20'"
+        class="pt-16 min-h-screen transition-all duration-300">
+    <div class="p-6">
 
-    <!-- TAB: NEURONS -->
-    <section x-show="activeTab === 'neurons'" x-cloak>
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">Neurons <span class="text-sm font-normal text-gray-500" x-text="'(' + neuronTotal + ')'"></span></h2>
-        <button @click="loadNeurons()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50">Refresh</button>
-      </div>
-      <div class="flex gap-4">
-        <div class="flex-1 min-w-0">
-          <div x-show="neuronsLoading" class="bg-white border rounded-lg p-12 text-center">
-            <div class="inline-block w-5 h-5 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+      <!-- OVERVIEW TAB -->
+      <section x-show="activeTab === 'overview'" x-cloak>
+        <!-- Page Header -->
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark">System Overview</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1" x-text="lastRefresh ? 'Last updated: ' + lastRefresh : 'Loading...'"></p>
           </div>
-          <div x-show="!neuronsLoading && neurons.length > 0" class="bg-white border rounded-lg overflow-hidden">
-            <table class="w-full text-sm">
+        </div>
+
+        <!-- Stats Cards Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <!-- Neurons Card -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center justify-between mb-3">
+              <span class="material-icons-outlined text-md-primary text-3xl">psychology</span>
+              <span class="text-xs font-medium text-md-success bg-md-success/10 px-2 py-1 rounded-full">Active</span>
+            </div>
+            <p class="text-3xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="formatNumber(stats.neurons ?? 0)"></p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Total Neurons</p>
+          </div>
+
+          <!-- Synapses Card -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center justify-between mb-3">
+              <span class="material-icons-outlined text-md-secondary text-3xl">share</span>
+            </div>
+            <p class="text-3xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="formatNumber(stats.synapses ?? 0)"></p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Connections</p>
+          </div>
+
+          <!-- Chunks Card -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center justify-between mb-3">
+              <span class="material-icons-outlined text-amber-600 text-3xl">inventory_2</span>
+            </div>
+            <p class="text-3xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="formatNumber(stats.chunks?.total ?? 0)"></p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Data Chunks</p>
+          </div>
+
+          <!-- Storage Card -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center justify-between mb-3">
+              <span class="material-icons-outlined text-teal-600 text-3xl">storage</span>
+            </div>
+            <p class="text-3xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="formatBytes(stats.chunks?.totalSize)"></p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Total Storage</p>
+          </div>
+        </div>
+
+        <!-- Second Row Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="material-icons-outlined text-indigo-500">scatter_plot</span>
+              <span class="text-sm font-medium text-gray-500 dark:text-gray-400">HNSW Vectors</span>
+            </div>
+            <p class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="formatNumber(stats.hnsw?.totalNodes ?? 0)"></p>
+          </div>
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="material-icons-outlined text-pink-500">layers</span>
+              <span class="text-sm font-medium text-gray-500 dark:text-gray-400">HNSW Layers</span>
+            </div>
+            <p class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="stats.hnsw?.maxLayer ?? 0"></p>
+          </div>
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="material-icons-outlined text-cyan-500">dns</span>
+              <span class="text-sm font-medium text-gray-500 dark:text-gray-400">Storage Backend</span>
+            </div>
+            <p class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="stats.storage?.backend ?? 'LevelDB'"></p>
+          </div>
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="material-icons-outlined text-orange-500">data_array</span>
+              <span class="text-sm font-medium text-gray-500 dark:text-gray-400">Avg Chunk Size</span>
+            </div>
+            <p class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="formatBytes(stats.chunks?.avgSize)"></p>
+          </div>
+        </div>
+
+        <!-- Recent Activity Table -->
+        <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+          <div class="px-6 py-4 border-b border-md-outline dark:border-md-outline-dark">
+            <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark flex items-center gap-2">
+              <span class="material-icons-outlined text-md-primary">history</span>
+              Recent Neurons
+            </h3>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full">
               <thead>
-                <tr class="border-b bg-gray-50">
-                  <th class="text-left text-xs font-semibold text-gray-600 px-4 py-2.5">ID</th>
-                  <th class="text-left text-xs font-semibold text-gray-600 px-4 py-2.5">Type</th>
-                  <th class="text-left text-xs font-semibold text-gray-600 px-4 py-2.5">Tags</th>
-                  <th class="text-right text-xs font-semibold text-gray-600 px-4 py-2.5">Chunks</th>
+                <tr class="bg-md-surface-variant dark:bg-md-surface-dark border-b border-md-outline dark:border-md-outline-dark">
+                  <th class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider px-6 py-3">ID</th>
+                  <th class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider px-6 py-3">Type</th>
+                  <th class="text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider px-6 py-3">Tags</th>
+                  <th class="text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider px-6 py-3">Chunks</th>
                 </tr>
               </thead>
-              <tbody>
-                <template x-for="neuron in neurons" :key="neuron.id">
-                  <tr @click="selectNeuron(neuron)" :class="selectedNeuron?.id === neuron.id ? 'bg-indigo-50' : 'hover:bg-gray-50'" class="border-b cursor-pointer">
-                    <td class="px-4 py-2.5 font-mono text-xs text-indigo-700" x-text="neuron.id.substring(0, 8) + '...'"></td>
-                    <td class="px-4 py-2.5 text-gray-700" x-text="neuron.sourceType || '--'"></td>
-                    <td class="px-4 py-2.5">
-                      <template x-for="tag in (neuron.tags || []).slice(0,3)" :key="tag">
-                        <span class="inline-block bg-indigo-50 text-indigo-700 text-xs px-1.5 py-0.5 rounded mr-1" x-text="tag"></span>
-                      </template>
+              <tbody class="divide-y divide-md-outline dark:divide-md-outline-dark">
+                <template x-for="neuron in recentNeurons.slice(0, 5)" :key="neuron.id">
+                  <tr class="hover:bg-md-surface-variant dark:hover:bg-md-surface-dark transition-colors">
+                    <td class="px-6 py-4">
+                      <span class="font-mono text-sm text-md-primary dark:text-md-primary-light" x-text="neuron.id?.substring(0, 12) + '...'"></span>
                     </td>
-                    <td class="px-4 py-2.5 text-right font-mono text-xs" x-text="neuron.chunks ?? '--'"></td>
+                    <td class="px-6 py-4">
+                      <span class="text-sm text-md-on-surface dark:text-md-on-surface-dark" x-text="neuron.sourceType || 'Unknown'"></span>
+                    </td>
+                    <td class="px-6 py-4">
+                      <div class="flex flex-wrap gap-1">
+                        <template x-for="tag in (neuron.tags || []).slice(0, 3)" :key="tag">
+                          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-md-primary/10 text-md-primary dark:bg-md-primary/20 dark:text-md-primary-light" x-text="tag"></span>
+                        </template>
+                      </div>
+                    </td>
+                    <td class="px-6 py-4 text-right">
+                      <span class="text-sm font-mono text-md-on-surface dark:text-md-on-surface-dark" x-text="neuron.chunks ?? 0"></span>
+                    </td>
                   </tr>
                 </template>
+                <tr x-show="recentNeurons.length === 0">
+                  <td colspan="4" class="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                    <span class="material-icons-outlined text-4xl mb-2 block">inbox</span>
+                    No neurons yet. Start by ingesting some content.
+                  </td>
+                </tr>
               </tbody>
             </table>
-            <div class="flex items-center justify-between px-4 py-3 border-t bg-gray-50">
-              <span class="text-xs text-gray-500" x-text="paginationLabel()"></span>
-              <div class="flex gap-2">
-                <button @click="prevPage()" :disabled="neuronPage === 0" class="px-3 py-1.5 text-xs bg-white border rounded disabled:opacity-40">Prev</button>
-                <button @click="nextPage()" :disabled="(neuronPage + 1) * neuronLimit >= neuronTotal" class="px-3 py-1.5 text-xs bg-white border rounded disabled:opacity-40">Next</button>
-              </div>
-            </div>
           </div>
         </div>
-        <div x-show="selectedNeuron" x-cloak class="w-80 flex-shrink-0">
-          <div class="bg-white border rounded-lg overflow-hidden sticky top-4">
-            <div class="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
-              <h3 class="text-sm font-semibold">Detail</h3>
-              <button @click="selectedNeuron = null" class="text-gray-400 hover:text-gray-600">&times;</button>
-            </div>
-            <div class="p-4 space-y-3 max-h-96 overflow-y-auto text-xs">
-              <div><label class="text-gray-500">ID</label><p class="font-mono break-all" x-text="selectedNeuron?.id"></p></div>
-              <div><label class="text-gray-500">Merkle Root</label><p class="font-mono break-all" x-text="selectedNeuron?.merkleRoot || '--'"></p></div>
-              <div><label class="text-gray-500">Content</label><pre class="bg-gray-50 border rounded p-2 max-h-40 overflow-y-auto whitespace-pre-wrap" x-text="selectedContent || 'Loading...'"></pre></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- TAB: GRAPH -->
-    <section x-show="activeTab === 'graph'" x-cloak>
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">Knowledge Graph</h2>
-        <button @click="loadGraph()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50">Refresh</button>
-      </div>
-      <div class="grid grid-cols-3 gap-4 mb-4">
-        <div class="bg-white border rounded-lg p-4">
-          <p class="text-2xl font-bold text-indigo-600" x-text="graphData.stats?.nodeCount ?? 0"></p>
-          <p class="text-xs text-gray-500">Nodes</p>
-        </div>
-        <div class="bg-white border rounded-lg p-4">
-          <p class="text-2xl font-bold text-emerald-600" x-text="graphData.stats?.edgeCount ?? 0"></p>
-          <p class="text-xs text-gray-500">Edges</p>
-        </div>
-        <div class="bg-white border rounded-lg p-4">
-          <p class="text-2xl font-bold text-amber-600" x-text="graphData.nodes?.length > 0 ? (graphData.edges?.length / graphData.nodes?.length).toFixed(2) : 0"></p>
-          <p class="text-xs text-gray-500">Avg Connections</p>
-        </div>
-      </div>
-      <div class="bg-white border rounded-lg p-4">
-        <h3 class="text-sm font-semibold mb-3">Graph Edges</h3>
-        <div class="max-h-80 overflow-y-auto">
-          <table class="w-full text-xs">
-            <thead class="sticky top-0 bg-white">
-              <tr class="border-b"><th class="text-left px-2 py-1">Source</th><th class="text-left px-2 py-1">Target</th><th class="text-left px-2 py-1">Type</th><th class="text-right px-2 py-1">Weight</th></tr>
-            </thead>
-            <tbody>
-              <template x-for="(edge, i) in (graphData.edges || []).slice(0, 100)" :key="i">
-                <tr class="border-b border-gray-50">
-                  <td class="px-2 py-1 font-mono" x-text="edge.source?.substring(0, 8) + '...'"></td>
-                  <td class="px-2 py-1 font-mono" x-text="edge.target?.substring(0, 8) + '...'"></td>
-                  <td class="px-2 py-1" x-text="edge.type"></td>
-                  <td class="px-2 py-1 text-right" x-text="edge.weight?.toFixed(3)"></td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB: INFERENCE -->
-    <section x-show="activeTab === 'inference'" x-cloak>
-      <h2 class="text-base font-semibold text-gray-900 mb-4">Inference Engine</h2>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div class="bg-white border rounded-lg p-5">
-          <h3 class="text-sm font-semibold mb-3">Run Inference</h3>
-          <div class="space-y-3">
-            <div>
-              <label class="text-xs text-gray-600 block mb-1">Neuron ID</label>
-              <input type="text" x-model="inferNeuronId" placeholder="Enter neuron ID..." class="w-full px-3 py-2 text-sm border rounded focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="text-xs text-gray-600 block mb-1">Type</label>
-                <select x-model="inferType" class="w-full px-3 py-2 text-sm border rounded">
-                  <option value="forward">Forward</option>
-                  <option value="backward">Backward</option>
-                  <option value="causal">Causal</option>
-                  <option value="bidirectional">Bidirectional</option>
-                </select>
-              </div>
-              <div>
-                <label class="text-xs text-gray-600 block mb-1">Depth</label>
-                <input type="number" x-model.number="inferDepth" min="1" max="10" class="w-full px-3 py-2 text-sm border rounded">
-              </div>
-            </div>
-            <button @click="runInference()" :disabled="inferring || !inferNeuronId" class="w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
-              <span x-show="inferring" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-              Run Inference
-            </button>
+      <!-- NEURONS TAB -->
+      <section x-show="activeTab === 'neurons'" x-cloak>
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark">Neurons</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Total: <span x-text="neuronTotal"></span> neurons</p>
           </div>
+          <button @click="loadNeurons()"
+                  class="flex items-center gap-2 px-4 py-2 bg-md-primary text-white rounded-full text-sm font-medium hover:bg-md-primary-dark shadow-md-1 transition-all">
+            <span class="material-icons-outlined text-xl">refresh</span>
+            Refresh
+          </button>
         </div>
-        <div class="bg-white border rounded-lg p-5">
-          <h3 class="text-sm font-semibold mb-3">Results</h3>
-          <div x-show="inferResults" class="space-y-2">
-            <div class="flex gap-4 text-xs">
-              <span class="text-gray-500">Type: <span class="font-semibold text-gray-900" x-text="inferResults?.type"></span></span>
-              <span class="text-gray-500">Found: <span class="font-semibold text-gray-900" x-text="inferResults?.totalFound"></span></span>
-            </div>
-            <div class="max-h-60 overflow-y-auto">
-              <template x-for="(r, i) in (inferResults?.results || []).slice(0, 20)" :key="i">
-                <div class="flex items-center justify-between py-1 border-b border-gray-100 text-xs">
-                  <span class="font-mono text-indigo-700" x-text="r.id?.substring(0, 12) + '...'"></span>
-                  <span class="text-gray-500">depth: <span x-text="r.distance"></span></span>
+
+        <div class="flex gap-6">
+          <!-- Neurons List -->
+          <div class="flex-1">
+            <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+              <div x-show="neuronsLoading" class="p-12 text-center">
+                <div class="inline-block w-8 h-8 border-4 border-md-primary/20 border-t-md-primary rounded-full animate-spin"></div>
+                <p class="mt-4 text-gray-500 dark:text-gray-400">Loading neurons...</p>
+              </div>
+              <div x-show="!neuronsLoading">
+                <table class="w-full">
+                  <thead>
+                    <tr class="bg-md-surface-variant dark:bg-md-surface-dark border-b border-md-outline dark:border-md-outline-dark">
+                      <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-6 py-3">ID</th>
+                      <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-6 py-3">Type</th>
+                      <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-6 py-3">Tags</th>
+                      <th class="text-right text-xs font-medium text-gray-500 uppercase tracking-wider px-6 py-3">Chunks</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-md-outline dark:divide-md-outline-dark">
+                    <template x-for="neuron in neurons" :key="neuron.id">
+                      <tr @click="selectNeuron(neuron)"
+                          :class="selectedNeuron?.id === neuron.id ? 'bg-md-primary/5 dark:bg-md-primary/10' : 'hover:bg-md-surface-variant dark:hover:bg-md-surface-dark'"
+                          class="cursor-pointer transition-colors">
+                        <td class="px-6 py-4 font-mono text-sm text-md-primary dark:text-md-primary-light" x-text="neuron.id?.substring(0, 12) + '...'"></td>
+                        <td class="px-6 py-4 text-sm text-md-on-surface dark:text-md-on-surface-dark" x-text="neuron.sourceType || '--'"></td>
+                        <td class="px-6 py-4">
+                          <div class="flex flex-wrap gap-1">
+                            <template x-for="tag in (neuron.tags || []).slice(0, 3)" :key="tag">
+                              <span class="px-2 py-0.5 text-xs rounded-full bg-md-primary/10 text-md-primary dark:bg-md-primary/20 dark:text-md-primary-light" x-text="tag"></span>
+                            </template>
+                          </div>
+                        </td>
+                        <td class="px-6 py-4 text-right font-mono text-sm text-md-on-surface dark:text-md-on-surface-dark" x-text="neuron.chunks ?? '--'"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+                <!-- Pagination -->
+                <div class="flex items-center justify-between px-6 py-4 bg-md-surface-variant dark:bg-md-surface-dark border-t border-md-outline dark:border-md-outline-dark">
+                  <span class="text-sm text-gray-500 dark:text-gray-400" x-text="paginationLabel()"></span>
+                  <div class="flex gap-2">
+                    <button @click="prevPage()" :disabled="neuronPage === 0"
+                            class="px-4 py-2 text-sm font-medium rounded-full border border-md-outline dark:border-md-outline-dark disabled:opacity-40 hover:bg-md-surface-variant dark:hover:bg-md-surface transition-colors">
+                      Previous
+                    </button>
+                    <button @click="nextPage()" :disabled="(neuronPage + 1) * neuronLimit >= neuronTotal"
+                            class="px-4 py-2 text-sm font-medium rounded-full border border-md-outline dark:border-md-outline-dark disabled:opacity-40 hover:bg-md-surface-variant dark:hover:bg-md-surface transition-colors">
+                      Next
+                    </button>
+                  </div>
                 </div>
-              </template>
+              </div>
             </div>
           </div>
-          <p x-show="!inferResults" class="text-sm text-gray-400 text-center py-8">Run inference to see results</p>
-        </div>
-      </div>
-    </section>
 
-    <!-- TAB: ATTRACTORS -->
-    <section x-show="activeTab === 'attractors'" x-cloak>
-      <h2 class="text-base font-semibold text-gray-900 mb-4">Attractor Model</h2>
-      <div class="bg-white border rounded-lg p-5">
-        <div class="text-center py-8">
-          <p class="text-gray-500 mb-2">Attractors are managed via CLI</p>
-          <div class="bg-gray-100 rounded p-3 font-mono text-xs text-left inline-block">
-            <p class="text-gray-600"># Create attractor</p>
-            <p class="text-indigo-700">nmt attractor create "Goal Name" --strength 0.8</p>
-            <p class="text-gray-600 mt-2"># List attractors</p>
-            <p class="text-indigo-700">nmt attractor list</p>
-            <p class="text-gray-600 mt-2"># Find path to goal</p>
-            <p class="text-indigo-700">nmt attractor path &lt;neuron-id&gt; &lt;attractor-id&gt;</p>
-            <p class="text-gray-600 mt-2"># Calculate influence</p>
-            <p class="text-indigo-700">nmt attractor influence &lt;neuron-id&gt;</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB: LEARNING -->
-    <section x-show="activeTab === 'learning'" x-cloak>
-      <h2 class="text-base font-semibold text-gray-900 mb-4">Four-Stage Learning</h2>
-      <div class="grid grid-cols-4 gap-4 mb-6">
-        <div class="bg-white border rounded-lg p-4 text-center">
-          <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-2">
-            <span class="text-blue-600 font-bold">1</span>
-          </div>
-          <p class="text-sm font-semibold">Extract</p>
-          <p class="text-xs text-gray-500">Identify info</p>
-        </div>
-        <div class="bg-white border rounded-lg p-4 text-center">
-          <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-2">
-            <span class="text-green-600 font-bold">2</span>
-          </div>
-          <p class="text-sm font-semibold">Pattern</p>
-          <p class="text-xs text-gray-500">Recognize patterns</p>
-        </div>
-        <div class="bg-white border rounded-lg p-4 text-center">
-          <div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-2">
-            <span class="text-amber-600 font-bold">3</span>
-          </div>
-          <p class="text-sm font-semibold">Process</p>
-          <p class="text-xs text-gray-500">Learn reasoning</p>
-        </div>
-        <div class="bg-white border rounded-lg p-4 text-center">
-          <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-2">
-            <span class="text-purple-600 font-bold">4</span>
-          </div>
-          <p class="text-sm font-semibold">Outcome</p>
-          <p class="text-xs text-gray-500">Apply feedback</p>
-        </div>
-      </div>
-      <div class="bg-white border rounded-lg p-5">
-        <h3 class="text-sm font-semibold mb-3">CLI Commands</h3>
-        <div class="bg-gray-100 rounded p-3 font-mono text-xs">
-          <p class="text-gray-600"># Start learning session</p>
-          <p class="text-indigo-700">nmt learn session start</p>
-          <p class="text-gray-600 mt-2"># Extract from neuron</p>
-          <p class="text-indigo-700">nmt learn extract &lt;neuron-id&gt; --limit 20</p>
-          <p class="text-gray-600 mt-2"># Full learning pipeline</p>
-          <p class="text-indigo-700">nmt orchestrate learn --input "Q" --output "A" --success</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB: SYNC -->
-    <section x-show="activeTab === 'sync'" x-cloak>
-      <h2 class="text-base font-semibold text-gray-900 mb-4">State Synchronization</h2>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div>
-          <button @click="loadSyncStatus()" class="mb-3 text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50">Refresh Status</button>
-          <div class="bg-white border rounded-lg p-5">
-            <h3 class="text-sm font-semibold mb-3">Current State</h3>
-            <div class="space-y-2 text-xs">
-              <div class="flex justify-between"><span class="text-gray-500">Node ID</span><span class="font-mono" x-text="syncStatus?.nodeId ?? '--'"></span></div>
-              <div class="flex justify-between"><span class="text-gray-500">Sequence</span><span class="font-mono" x-text="syncStatus?.sequence ?? 0"></span></div>
-              <div class="flex justify-between"><span class="text-gray-500">Neurons</span><span class="font-mono" x-text="syncStatus?.neuronCount ?? 0"></span></div>
-              <div class="flex justify-between"><span class="text-gray-500">Peers</span><span class="font-mono" x-text="syncStatus?.peers?.length ?? 0"></span></div>
+          <!-- Detail Panel -->
+          <div x-show="selectedNeuron" x-cloak class="w-96 flex-shrink-0">
+            <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-2 sticky top-24 overflow-hidden">
+              <div class="flex items-center justify-between px-6 py-4 bg-md-primary dark:bg-md-primary-dark">
+                <h3 class="text-lg font-medium text-white flex items-center gap-2">
+                  <span class="material-icons-outlined">info</span>
+                  Details
+                </h3>
+                <button @click="selectedNeuron = null" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10">
+                  <span class="material-icons-outlined text-white">close</span>
+                </button>
+              </div>
+              <div class="p-6 space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
+                <div>
+                  <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Neuron ID</label>
+                  <p class="font-mono text-sm text-md-on-surface dark:text-md-on-surface-dark mt-1 break-all" x-text="selectedNeuron?.id"></p>
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Merkle Root</label>
+                  <p class="font-mono text-sm text-md-on-surface dark:text-md-on-surface-dark mt-1 break-all" x-text="selectedNeuron?.merkleRoot || '--'"></p>
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Content</label>
+                  <pre class="mt-2 bg-md-surface-variant dark:bg-md-surface-dark rounded-lg p-4 text-sm text-md-on-surface dark:text-md-on-surface-dark max-h-60 overflow-y-auto whitespace-pre-wrap" x-text="selectedContent || 'Loading...'"></pre>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-        <div class="bg-white border rounded-lg p-5">
-          <h3 class="text-sm font-semibold mb-3">CLI Commands</h3>
-          <div class="bg-gray-100 rounded p-3 font-mono text-xs">
-            <p class="text-gray-600"># Check sync status</p>
-            <p class="text-indigo-700">nmt sync status</p>
-            <p class="text-gray-600 mt-2"># View change log</p>
-            <p class="text-indigo-700">nmt sync changes --from 0</p>
-            <p class="text-gray-600 mt-2"># Export state</p>
-            <p class="text-indigo-700">nmt sync export --output backup.json</p>
-            <p class="text-gray-600 mt-2"># Import state</p>
-            <p class="text-indigo-700">nmt sync import backup.json</p>
+      </section>
+
+      <!-- GRAPH TAB -->
+      <section x-show="activeTab === 'graph'" x-cloak x-init="$watch('activeTab', val => { if(val === 'graph') setTimeout(() => renderGraph(), 100) })">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark">Knowledge Graph</h2>
+          <div class="flex items-center gap-3">
+            <button @click="graphViewMode = graphViewMode === 'graph' ? 'table' : 'graph'"
+                    class="flex items-center gap-2 px-4 py-2 bg-md-surface dark:bg-md-surface-variant-dark border border-md-outline dark:border-md-outline-dark rounded-full text-sm font-medium hover:bg-md-surface-variant transition-colors">
+              <span class="material-icons-outlined text-xl" x-text="graphViewMode === 'graph' ? 'table_rows' : 'hub'"></span>
+              <span x-text="graphViewMode === 'graph' ? 'Table' : 'Graph'"></span>
+            </button>
+            <button @click="loadGraph(); setTimeout(() => renderGraph(), 200)" class="flex items-center gap-2 px-4 py-2 bg-md-primary text-white rounded-full text-sm font-medium hover:bg-md-primary-dark shadow-md-1">
+              <span class="material-icons-outlined text-xl">refresh</span>
+              Refresh
+            </button>
           </div>
         </div>
-      </div>
-    </section>
 
-    <!-- TAB: SEARCH -->
-    <section x-show="activeTab === 'search'" x-cloak>
-      <h2 class="text-base font-semibold text-gray-900 mb-4">Semantic Search</h2>
-      <div class="bg-white border rounded-lg p-5 mb-5">
-        <div class="flex gap-3">
-          <input type="text" x-model="searchQuery" @keydown.enter="doSearch()" placeholder="Enter search query..." class="flex-1 px-3 py-2 text-sm border rounded focus:ring-2 focus:ring-indigo-500 outline-none">
-          <input type="number" x-model.number="searchK" min="1" max="100" class="w-20 px-3 py-2 text-sm border rounded" placeholder="K">
-          <label class="flex items-center gap-2 text-xs"><input type="checkbox" x-model="searchIncludeContent" class="rounded"> Content</label>
-          <button @click="doSearch()" :disabled="searching || !searchQuery" class="px-5 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50">Search</button>
-        </div>
-      </div>
-      <div x-show="searchResults.length > 0" class="space-y-3">
-        <template x-for="(r, i) in searchResults" :key="i">
-          <div class="bg-white border rounded-lg p-4">
+        <!-- Graph Stats -->
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
             <div class="flex items-center gap-3 mb-2">
-              <span class="font-mono text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded" x-text="r.neuronId?.substring(0, 12) + '...'"></span>
-              <span class="text-xs font-semibold px-2 py-0.5 rounded" :class="r.score > 0.8 ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50'" x-text="'Score: ' + r.score?.toFixed(4)"></span>
+              <span class="material-icons-outlined text-md-primary">hub</span>
+              <span class="text-sm text-gray-500 dark:text-gray-400">Nodes</span>
             </div>
-            <pre x-show="r.content" class="bg-gray-50 border rounded p-3 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto" x-text="r.content"></pre>
+            <p class="text-3xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="graphData.stats?.nodeCount ?? 0"></p>
           </div>
-        </template>
-      </div>
-    </section>
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center gap-3 mb-2">
+              <span class="material-icons-outlined text-md-success">link</span>
+              <span class="text-sm text-gray-500 dark:text-gray-400">Edges</span>
+            </div>
+            <p class="text-3xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="graphData.stats?.edgeCount ?? 0"></p>
+          </div>
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center gap-3 mb-2">
+              <span class="material-icons-outlined text-amber-500">analytics</span>
+              <span class="text-sm text-gray-500 dark:text-gray-400">Avg Connections</span>
+            </div>
+            <p class="text-3xl font-medium text-md-on-surface dark:text-md-on-surface-dark"
+               x-text="graphData.stats?.nodeCount > 0 ? (graphData.stats?.edgeCount / graphData.stats?.nodeCount).toFixed(2) : '0'"></p>
+          </div>
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-5 shadow-md-1">
+            <div class="flex items-center gap-3 mb-2">
+              <span class="material-icons-outlined text-purple-500">category</span>
+              <span class="text-sm text-gray-500 dark:text-gray-400">Edge Types</span>
+            </div>
+            <p class="text-3xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="[...new Set((graphData.edges || []).map(e => e.type))].length"></p>
+          </div>
+        </div>
 
-    <!-- TAB: INGEST -->
-    <section x-show="activeTab === 'ingest'" x-cloak>
-      <h2 class="text-base font-semibold text-gray-900 mb-4">Ingest Content</h2>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div class="bg-white border rounded-lg p-5">
-          <div class="space-y-4">
+        <!-- Graph Visualization -->
+        <div x-show="graphViewMode === 'graph'" class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+          <div class="px-6 py-4 border-b border-md-outline dark:border-md-outline-dark flex items-center justify-between">
+            <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark flex items-center gap-2">
+              <span class="material-icons-outlined text-md-primary">scatter_plot</span>
+              Interactive Graph
+            </h3>
+            <div class="flex items-center gap-4 text-xs text-gray-500">
+              <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-md-primary"></span> Neurons</span>
+              <span class="flex items-center gap-1"><span class="w-8 h-0.5 bg-gray-400"></span> Synapses</span>
+              <span>Drag to move | Scroll to zoom</span>
+            </div>
+          </div>
+          <div id="graph-container" class="relative" style="height: 500px;">
+            <svg id="graph-svg" class="w-full h-full"></svg>
+            <!-- Tooltip -->
+            <div id="graph-tooltip" class="absolute hidden bg-md-surface-dark text-white text-xs px-3 py-2 rounded-lg shadow-md-3 pointer-events-none z-10">
+              <p class="font-mono" id="tooltip-id"></p>
+              <p id="tooltip-label"></p>
+            </div>
+            <!-- Empty State -->
+            <div x-show="!graphData.nodes || graphData.nodes.length === 0" class="absolute inset-0 flex items-center justify-center">
+              <div class="text-center">
+                <span class="material-icons-outlined text-6xl text-gray-300 dark:text-gray-600">hub</span>
+                <p class="mt-4 text-gray-500 dark:text-gray-400">No graph data available</p>
+                <p class="text-sm text-gray-400 dark:text-gray-500">Ingest some content to see the knowledge graph</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Table View -->
+        <div x-show="graphViewMode === 'table'" class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+          <div class="px-6 py-4 border-b border-md-outline dark:border-md-outline-dark">
+            <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark flex items-center gap-2">
+              <span class="material-icons-outlined text-md-primary">table_rows</span>
+              Edge List
+            </h3>
+          </div>
+          <div class="max-h-96 overflow-y-auto">
+            <table class="w-full">
+              <thead class="sticky top-0 bg-md-surface-variant dark:bg-md-surface-dark">
+                <tr class="border-b border-md-outline dark:border-md-outline-dark">
+                  <th class="text-left text-xs font-medium text-gray-500 uppercase px-6 py-3">Source</th>
+                  <th class="text-left text-xs font-medium text-gray-500 uppercase px-6 py-3">Target</th>
+                  <th class="text-left text-xs font-medium text-gray-500 uppercase px-6 py-3">Type</th>
+                  <th class="text-right text-xs font-medium text-gray-500 uppercase px-6 py-3">Weight</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-md-outline dark:divide-md-outline-dark">
+                <template x-for="(edge, i) in (graphData.edges || []).slice(0, 100)" :key="i">
+                  <tr class="hover:bg-md-surface-variant dark:hover:bg-md-surface-dark">
+                    <td class="px-6 py-3 font-mono text-sm text-md-primary dark:text-md-primary-light" x-text="edge.source?.substring(0, 12) + '...'"></td>
+                    <td class="px-6 py-3 font-mono text-sm text-md-primary dark:text-md-primary-light" x-text="edge.target?.substring(0, 12) + '...'"></td>
+                    <td class="px-6 py-3">
+                      <span class="px-2 py-1 text-xs rounded-full bg-md-secondary/10 text-md-secondary" x-text="edge.type"></span>
+                    </td>
+                    <td class="px-6 py-3 text-right font-mono text-sm" x-text="edge.weight?.toFixed(4)"></td>
+                  </tr>
+                </template>
+                <tr x-show="!graphData.edges || graphData.edges.length === 0">
+                  <td colspan="4" class="px-6 py-8 text-center text-gray-500">No edges found</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- INFERENCE TAB -->
+      <section x-show="activeTab === 'inference'" x-cloak>
+        <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark mb-6">Inference Engine</h2>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Input Form -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+            <div class="px-6 py-4 bg-md-primary dark:bg-md-primary-dark">
+              <h3 class="text-lg font-medium text-white flex items-center gap-2">
+                <span class="material-icons-outlined">play_arrow</span>
+                Run Inference
+              </h3>
+            </div>
+            <div class="p-6 space-y-4">
+              <div>
+                <label class="text-sm font-medium text-md-on-surface dark:text-md-on-surface-dark block mb-2">Neuron ID</label>
+                <input type="text" x-model="inferNeuronId" placeholder="Enter neuron ID..."
+                       class="w-full px-4 py-3 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm font-mono focus:ring-2 focus:ring-md-primary focus:border-transparent outline-none transition-all">
+              </div>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="text-sm font-medium text-md-on-surface dark:text-md-on-surface-dark block mb-2">Inference Type</label>
+                  <select x-model="inferType" class="w-full px-4 py-3 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+                    <option value="forward">Forward</option>
+                    <option value="backward">Backward</option>
+                    <option value="causal">Causal</option>
+                    <option value="bidirectional">Bidirectional</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-sm font-medium text-md-on-surface dark:text-md-on-surface-dark block mb-2">Depth</label>
+                  <input type="number" x-model.number="inferDepth" min="1" max="10"
+                         class="w-full px-4 py-3 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+                </div>
+              </div>
+              <button @click="runInference()" :disabled="inferring || !inferNeuronId"
+                      class="w-full py-3 bg-md-primary text-white rounded-lg font-medium hover:bg-md-primary-dark disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md-1 transition-all">
+                <span x-show="inferring" class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                <span class="material-icons-outlined" x-show="!inferring">play_arrow</span>
+                Run Inference
+              </button>
+            </div>
+          </div>
+
+          <!-- Results -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+            <div class="px-6 py-4 border-b border-md-outline dark:border-md-outline-dark">
+              <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark flex items-center gap-2">
+                <span class="material-icons-outlined text-md-primary">insights</span>
+                Results
+              </h3>
+            </div>
+            <div class="p-6">
+              <div x-show="inferResults" class="space-y-4">
+                <div class="flex flex-wrap gap-4 text-sm">
+                  <span class="px-3 py-1 bg-md-primary/10 text-md-primary rounded-full">Type: <span class="font-medium" x-text="inferResults?.type"></span></span>
+                  <span class="px-3 py-1 bg-md-success/10 text-md-success rounded-full">Found: <span class="font-medium" x-text="inferResults?.totalFound"></span></span>
+                </div>
+                <div class="max-h-72 overflow-y-auto space-y-2">
+                  <template x-for="(r, i) in (inferResults?.results || []).slice(0, 20)" :key="i">
+                    <div class="flex items-center justify-between p-3 bg-md-surface-variant dark:bg-md-surface-dark rounded-lg">
+                      <span class="font-mono text-sm text-md-primary dark:text-md-primary-light" x-text="r.id?.substring(0, 16) + '...'"></span>
+                      <span class="text-xs px-2 py-1 bg-md-outline dark:bg-md-outline-dark rounded-full" x-text="'Depth: ' + r.distance"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+              <div x-show="!inferResults" class="text-center py-12">
+                <span class="material-icons-outlined text-6xl text-gray-300 dark:text-gray-600">timeline</span>
+                <p class="mt-4 text-gray-500 dark:text-gray-400">Run inference to see results</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ATTRACTORS TAB -->
+      <section x-show="activeTab === 'attractors'" x-cloak>
+        <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark mb-6">Attractor Model</h2>
+
+        <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 p-8">
+          <div class="text-center max-w-2xl mx-auto">
+            <span class="material-icons-outlined text-6xl text-md-primary mb-4">track_changes</span>
+            <h3 class="text-xl font-medium text-md-on-surface dark:text-md-on-surface-dark mb-2">Goal-Oriented Reasoning</h3>
+            <p class="text-gray-500 dark:text-gray-400 mb-6">Attractors define goal states that influence current decisions through probabilistic pathfinding.</p>
+
+            <div class="bg-md-surface-variant dark:bg-md-surface-dark rounded-xl p-6 text-left">
+              <h4 class="text-sm font-medium text-md-on-surface dark:text-md-on-surface-dark mb-4 flex items-center gap-2">
+                <span class="material-icons-outlined text-md-primary">terminal</span>
+                CLI Commands
+              </h4>
+              <div class="font-mono text-sm space-y-3">
+                <div>
+                  <p class="text-gray-500 dark:text-gray-400"># Create attractor</p>
+                  <p class="text-md-primary dark:text-md-primary-light">nmt attractor create "Goal Name" --strength 0.8</p>
+                </div>
+                <div>
+                  <p class="text-gray-500 dark:text-gray-400"># List all attractors</p>
+                  <p class="text-md-primary dark:text-md-primary-light">nmt attractor list</p>
+                </div>
+                <div>
+                  <p class="text-gray-500 dark:text-gray-400"># Find path to goal</p>
+                  <p class="text-md-primary dark:text-md-primary-light">nmt attractor path &lt;neuron-id&gt; &lt;attractor-id&gt;</p>
+                </div>
+                <div>
+                  <p class="text-gray-500 dark:text-gray-400"># Calculate influence</p>
+                  <p class="text-md-primary dark:text-md-primary-light">nmt attractor influence &lt;neuron-id&gt;</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- LEARNING TAB -->
+      <section x-show="activeTab === 'learning'" x-cloak>
+        <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark mb-6">Four-Stage Learning</h2>
+
+        <!-- Pipeline Steps -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-6 shadow-md-1 text-center">
+            <div class="w-14 h-14 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span class="material-icons-outlined text-blue-600 dark:text-blue-400 text-2xl">search</span>
+            </div>
+            <h4 class="font-medium text-md-on-surface dark:text-md-on-surface-dark">1. Extract</h4>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Identify information</p>
+          </div>
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-6 shadow-md-1 text-center">
+            <div class="w-14 h-14 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span class="material-icons-outlined text-green-600 dark:text-green-400 text-2xl">pattern</span>
+            </div>
+            <h4 class="font-medium text-md-on-surface dark:text-md-on-surface-dark">2. Pattern</h4>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Recognize patterns</p>
+          </div>
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-6 shadow-md-1 text-center">
+            <div class="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span class="material-icons-outlined text-amber-600 dark:text-amber-400 text-2xl">memory</span>
+            </div>
+            <h4 class="font-medium text-md-on-surface dark:text-md-on-surface-dark">3. Process</h4>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Learn reasoning</p>
+          </div>
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl p-6 shadow-md-1 text-center">
+            <div class="w-14 h-14 bg-purple-100 dark:bg-purple-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span class="material-icons-outlined text-purple-600 dark:text-purple-400 text-2xl">check_circle</span>
+            </div>
+            <h4 class="font-medium text-md-on-surface dark:text-md-on-surface-dark">4. Outcome</h4>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Apply feedback</p>
+          </div>
+        </div>
+
+        <!-- CLI Commands -->
+        <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 p-6">
+          <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark mb-4 flex items-center gap-2">
+            <span class="material-icons-outlined text-md-primary">terminal</span>
+            CLI Commands
+          </h3>
+          <div class="bg-md-surface-variant dark:bg-md-surface-dark rounded-lg p-4 font-mono text-sm space-y-3">
             <div>
-              <label class="text-xs font-medium text-gray-600 block mb-1">Text Content</label>
-              <textarea x-model="ingestText" rows="8" placeholder="Enter text to ingest..." class="w-full px-3 py-2 text-sm border rounded font-mono resize-y"></textarea>
+              <p class="text-gray-500 dark:text-gray-400"># Start learning session</p>
+              <p class="text-md-primary dark:text-md-primary-light">nmt learn session start</p>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div>
+              <p class="text-gray-500 dark:text-gray-400"># Extract from neuron</p>
+              <p class="text-md-primary dark:text-md-primary-light">nmt learn extract &lt;neuron-id&gt; --limit 20</p>
+            </div>
+            <div>
+              <p class="text-gray-500 dark:text-gray-400"># Full learning pipeline</p>
+              <p class="text-md-primary dark:text-md-primary-light">nmt orchestrate learn --input "Q" --output "A" --success</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SYNC TAB -->
+      <section x-show="activeTab === 'sync'" x-cloak>
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark">State Synchronization</h2>
+          <button @click="loadSyncStatus()" class="flex items-center gap-2 px-4 py-2 bg-md-primary text-white rounded-full text-sm font-medium hover:bg-md-primary-dark shadow-md-1">
+            <span class="material-icons-outlined text-xl">refresh</span>
+            Refresh Status
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Current State -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+            <div class="px-6 py-4 bg-md-primary dark:bg-md-primary-dark">
+              <h3 class="text-lg font-medium text-white flex items-center gap-2">
+                <span class="material-icons-outlined">sync</span>
+                Current State
+              </h3>
+            </div>
+            <div class="p-6 space-y-4">
+              <div class="flex justify-between items-center py-2 border-b border-md-outline dark:border-md-outline-dark">
+                <span class="text-sm text-gray-500 dark:text-gray-400">Node ID</span>
+                <span class="font-mono text-sm text-md-on-surface dark:text-md-on-surface-dark" x-text="syncStatus?.nodeId ?? '--'"></span>
+              </div>
+              <div class="flex justify-between items-center py-2 border-b border-md-outline dark:border-md-outline-dark">
+                <span class="text-sm text-gray-500 dark:text-gray-400">Sequence</span>
+                <span class="font-mono text-sm text-md-on-surface dark:text-md-on-surface-dark" x-text="syncStatus?.sequence ?? 0"></span>
+              </div>
+              <div class="flex justify-between items-center py-2 border-b border-md-outline dark:border-md-outline-dark">
+                <span class="text-sm text-gray-500 dark:text-gray-400">Neurons</span>
+                <span class="font-mono text-sm text-md-on-surface dark:text-md-on-surface-dark" x-text="syncStatus?.neuronCount ?? 0"></span>
+              </div>
+              <div class="flex justify-between items-center py-2">
+                <span class="text-sm text-gray-500 dark:text-gray-400">Peers</span>
+                <span class="font-mono text-sm text-md-on-surface dark:text-md-on-surface-dark" x-text="syncStatus?.peers?.length ?? 0"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- CLI Commands -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 p-6">
+            <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark mb-4 flex items-center gap-2">
+              <span class="material-icons-outlined text-md-primary">terminal</span>
+              CLI Commands
+            </h3>
+            <div class="bg-md-surface-variant dark:bg-md-surface-dark rounded-lg p-4 font-mono text-sm space-y-3">
               <div>
-                <label class="text-xs font-medium text-gray-600 block mb-1">Source Type</label>
-                <input type="text" x-model="ingestSourceType" placeholder="dashboard" class="w-full px-3 py-2 text-sm border rounded">
+                <p class="text-gray-500 dark:text-gray-400"># Check sync status</p>
+                <p class="text-md-primary dark:text-md-primary-light">nmt sync status</p>
               </div>
               <div>
-                <label class="text-xs font-medium text-gray-600 block mb-1">Tags</label>
-                <input type="text" x-model="ingestTags" placeholder="tag1, tag2" class="w-full px-3 py-2 text-sm border rounded">
+                <p class="text-gray-500 dark:text-gray-400"># View change log</p>
+                <p class="text-md-primary dark:text-md-primary-light">nmt sync changes --from 0</p>
+              </div>
+              <div>
+                <p class="text-gray-500 dark:text-gray-400"># Export state</p>
+                <p class="text-md-primary dark:text-md-primary-light">nmt sync export --output backup.json</p>
+              </div>
+              <div>
+                <p class="text-gray-500 dark:text-gray-400"># Import state</p>
+                <p class="text-md-primary dark:text-md-primary-light">nmt sync import backup.json</p>
               </div>
             </div>
-            <button @click="doIngest()" :disabled="ingesting || !ingestText" class="w-full px-4 py-2.5 text-sm font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:opacity-50">
-              <span x-text="ingesting ? 'Ingesting...' : 'Ingest'"></span>
-            </button>
           </div>
         </div>
-        <div>
-          <div x-show="ingestResult" class="bg-emerald-50 border border-emerald-200 rounded-lg p-5">
-            <h3 class="text-sm font-semibold text-emerald-800 mb-2">Success</h3>
-            <p class="text-xs font-mono break-all" x-text="'ID: ' + ingestResult?.neuronId"></p>
-            <p class="text-xs mt-1" x-text="'Chunks: ' + ingestResult?.chunks"></p>
-          </div>
-          <div x-show="ingestError" class="bg-red-50 border border-red-200 rounded-lg p-5">
-            <p class="text-sm text-red-700" x-text="ingestError"></p>
-          </div>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- TAB: VERIFY -->
-    <section x-show="activeTab === 'verify'" x-cloak>
-      <h2 class="text-base font-semibold text-gray-900 mb-4">Data Integrity</h2>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div class="space-y-4">
-          <div class="bg-white border rounded-lg p-5">
-            <h3 class="text-sm font-semibold mb-3">Verify All Neurons</h3>
-            <button @click="doVerifyAll()" :disabled="verifying" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50">
-              <span x-text="verifying ? 'Verifying...' : 'Run Verification'"></span>
-            </button>
-          </div>
-          <div x-show="verifyAllResult" class="bg-white border rounded-lg p-5">
-            <div class="flex gap-4 text-xs mb-3">
-              <span>Total: <span class="font-bold" x-text="verifyAllResult?.total"></span></span>
-              <span class="text-emerald-600">Valid: <span class="font-bold" x-text="verifyAllResult?.valid"></span></span>
-              <span class="text-red-600">Invalid: <span class="font-bold" x-text="verifyAllResult?.invalid"></span></span>
+      <!-- SEARCH TAB -->
+      <section x-show="activeTab === 'search'" x-cloak>
+        <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark mb-6">Semantic Search</h2>
+
+        <!-- Search Box -->
+        <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 p-6 mb-6">
+          <div class="flex flex-col sm:flex-row gap-4">
+            <div class="flex-1 relative">
+              <span class="material-icons-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">search</span>
+              <input type="text" x-model="searchQuery" @keydown.enter="doSearch()"
+                     placeholder="Enter your search query..."
+                     class="w-full pl-12 pr-4 py-3 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-full text-sm focus:ring-2 focus:ring-md-primary focus:border-transparent outline-none transition-all">
+            </div>
+            <div class="flex gap-3">
+              <input type="number" x-model.number="searchK" min="1" max="100" placeholder="K"
+                     class="w-20 px-4 py-3 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-full text-sm text-center focus:ring-2 focus:ring-md-primary outline-none">
+              <label class="flex items-center gap-2 px-4 py-3 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-full text-sm cursor-pointer">
+                <input type="checkbox" x-model="searchIncludeContent" class="rounded text-md-primary focus:ring-md-primary">
+                <span class="text-md-on-surface dark:text-md-on-surface-dark">Content</span>
+              </label>
+              <button @click="doSearch()" :disabled="searching || !searchQuery"
+                      class="px-6 py-3 bg-md-primary text-white rounded-full font-medium hover:bg-md-primary-dark disabled:opacity-50 shadow-md-1 flex items-center gap-2 transition-all">
+                <span x-show="searching" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                <span class="material-icons-outlined" x-show="!searching">search</span>
+                Search
+              </button>
             </div>
           </div>
         </div>
+
+        <!-- Results -->
         <div class="space-y-4">
-          <div class="bg-white border rounded-lg p-5">
-            <h3 class="text-sm font-semibold mb-3">Verify Single</h3>
-            <div class="flex gap-2">
-              <input type="text" x-model="verifyNeuronId" placeholder="Neuron ID..." class="flex-1 px-3 py-2 text-sm border rounded font-mono">
-              <button @click="doVerifySingle()" :disabled="verifySingleLoading" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50">Verify</button>
+          <template x-for="(r, i) in searchResults" :key="i">
+            <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 p-5 hover:shadow-md-2 transition-shadow">
+              <div class="flex items-center gap-4 mb-3">
+                <span class="font-mono text-sm px-3 py-1 bg-md-primary/10 text-md-primary dark:bg-md-primary/20 dark:text-md-primary-light rounded-full" x-text="r.neuronId?.substring(0, 16) + '...'"></span>
+                <span class="text-sm font-medium px-3 py-1 rounded-full"
+                      :class="r.score > 0.8 ? 'bg-md-success/10 text-md-success' : r.score > 0.5 ? 'bg-amber-500/10 text-amber-600' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'"
+                      x-text="'Score: ' + r.score?.toFixed(4)"></span>
+              </div>
+              <pre x-show="r.content" class="bg-md-surface-variant dark:bg-md-surface-dark rounded-lg p-4 text-sm font-mono text-md-on-surface dark:text-md-on-surface-dark whitespace-pre-wrap max-h-40 overflow-y-auto" x-text="r.content"></pre>
             </div>
-          </div>
-          <div x-show="verifySingleResult" :class="verifySingleResult?.valid ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'" class="border rounded-lg p-5">
-            <span class="text-xs font-bold px-2 py-0.5 rounded" :class="verifySingleResult?.valid ? 'text-emerald-800 bg-emerald-200' : 'text-red-800 bg-red-200'" x-text="verifySingleResult?.valid ? 'VALID' : 'INVALID'"></span>
+          </template>
+          <div x-show="searchResults.length === 0 && !searching" class="text-center py-12">
+            <span class="material-icons-outlined text-6xl text-gray-300 dark:text-gray-600">manage_search</span>
+            <p class="mt-4 text-gray-500 dark:text-gray-400">Enter a query to search</p>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
+      <!-- INGEST TAB -->
+      <section x-show="activeTab === 'ingest'" x-cloak>
+        <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark mb-6">Ingest Content</h2>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Input Form -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+            <div class="px-6 py-4 bg-md-success dark:bg-green-800">
+              <h3 class="text-lg font-medium text-white flex items-center gap-2">
+                <span class="material-icons-outlined">upload_file</span>
+                Add Content
+              </h3>
+            </div>
+            <div class="p-6 space-y-4">
+              <div>
+                <label class="text-sm font-medium text-md-on-surface dark:text-md-on-surface-dark block mb-2">Text Content</label>
+                <textarea x-model="ingestText" rows="8" placeholder="Paste or type text to ingest..."
+                          class="w-full px-4 py-3 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm font-mono resize-y focus:ring-2 focus:ring-md-primary focus:border-transparent outline-none transition-all"></textarea>
+              </div>
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="text-sm font-medium text-md-on-surface dark:text-md-on-surface-dark block mb-2">Source Type</label>
+                  <input type="text" x-model="ingestSourceType" placeholder="dashboard"
+                         class="w-full px-4 py-3 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+                </div>
+                <div>
+                  <label class="text-sm font-medium text-md-on-surface dark:text-md-on-surface-dark block mb-2">Tags (comma-separated)</label>
+                  <input type="text" x-model="ingestTags" placeholder="tag1, tag2, tag3"
+                         class="w-full px-4 py-3 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+                </div>
+              </div>
+              <button @click="doIngest()" :disabled="ingesting || !ingestText"
+                      class="w-full py-3 bg-md-success text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md-1 transition-all">
+                <span x-show="ingesting" class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                <span class="material-icons-outlined" x-show="!ingesting">upload</span>
+                <span x-text="ingesting ? 'Ingesting...' : 'Ingest Content'"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Result -->
+          <div class="space-y-4">
+            <div x-show="ingestResult" class="card bg-md-success/10 dark:bg-md-success/20 border border-md-success/30 rounded-xl p-6">
+              <div class="flex items-center gap-3 mb-4">
+                <span class="material-icons-outlined text-md-success text-3xl">check_circle</span>
+                <h3 class="text-lg font-medium text-md-success">Success!</h3>
+              </div>
+              <div class="space-y-2 font-mono text-sm">
+                <p class="text-md-on-surface dark:text-md-on-surface-dark"><span class="text-gray-500">ID:</span> <span x-text="ingestResult?.neuronId"></span></p>
+                <p class="text-md-on-surface dark:text-md-on-surface-dark"><span class="text-gray-500">Chunks:</span> <span x-text="ingestResult?.chunks"></span></p>
+              </div>
+            </div>
+            <div x-show="ingestError" class="card bg-md-error/10 dark:bg-md-error/20 border border-md-error/30 rounded-xl p-6">
+              <div class="flex items-center gap-3 mb-2">
+                <span class="material-icons-outlined text-md-error text-3xl">error</span>
+                <h3 class="text-lg font-medium text-md-error">Error</h3>
+              </div>
+              <p class="text-sm text-md-error" x-text="ingestError"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VERIFY TAB -->
+      <section x-show="activeTab === 'verify'" x-cloak>
+        <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark mb-6">Data Integrity</h2>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Verify All -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+            <div class="px-6 py-4 border-b border-md-outline dark:border-md-outline-dark">
+              <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark flex items-center gap-2">
+                <span class="material-icons-outlined text-md-primary">verified</span>
+                Verify All Neurons
+              </h3>
+            </div>
+            <div class="p-6">
+              <button @click="doVerifyAll()" :disabled="verifying"
+                      class="w-full py-3 bg-md-primary text-white rounded-lg font-medium hover:bg-md-primary-dark disabled:opacity-50 flex items-center justify-center gap-2 shadow-md-1 transition-all">
+                <span x-show="verifying" class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                <span class="material-icons-outlined" x-show="!verifying">verified_user</span>
+                <span x-text="verifying ? 'Verifying...' : 'Run Verification'"></span>
+              </button>
+
+              <div x-show="verifyAllResult" class="mt-6 grid grid-cols-3 gap-4">
+                <div class="text-center p-4 bg-md-surface-variant dark:bg-md-surface-dark rounded-lg">
+                  <p class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="verifyAllResult?.total"></p>
+                  <p class="text-xs text-gray-500 mt-1">Total</p>
+                </div>
+                <div class="text-center p-4 bg-md-success/10 dark:bg-md-success/20 rounded-lg">
+                  <p class="text-2xl font-medium text-md-success" x-text="verifyAllResult?.valid"></p>
+                  <p class="text-xs text-md-success mt-1">Valid</p>
+                </div>
+                <div class="text-center p-4 bg-md-error/10 dark:bg-md-error/20 rounded-lg">
+                  <p class="text-2xl font-medium text-md-error" x-text="verifyAllResult?.invalid"></p>
+                  <p class="text-xs text-md-error mt-1">Invalid</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Verify Single -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+            <div class="px-6 py-4 border-b border-md-outline dark:border-md-outline-dark">
+              <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark flex items-center gap-2">
+                <span class="material-icons-outlined text-md-primary">fact_check</span>
+                Verify Single Neuron
+              </h3>
+            </div>
+            <div class="p-6">
+              <div class="flex gap-3">
+                <input type="text" x-model="verifyNeuronId" placeholder="Enter neuron ID..."
+                       class="flex-1 px-4 py-3 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm font-mono focus:ring-2 focus:ring-md-primary outline-none">
+                <button @click="doVerifySingle()" :disabled="verifySingleLoading || !verifyNeuronId"
+                        class="px-6 py-3 bg-md-primary text-white rounded-lg font-medium hover:bg-md-primary-dark disabled:opacity-50 shadow-md-1 transition-all">
+                  Verify
+                </button>
+              </div>
+
+              <div x-show="verifySingleResult" class="mt-6">
+                <div :class="verifySingleResult?.valid ? 'bg-md-success/10 border-md-success/30' : 'bg-md-error/10 border-md-error/30'"
+                     class="border rounded-lg p-4 flex items-center gap-3">
+                  <span class="material-icons-outlined text-3xl" :class="verifySingleResult?.valid ? 'text-md-success' : 'text-md-error'"
+                        x-text="verifySingleResult?.valid ? 'check_circle' : 'cancel'"></span>
+                  <div>
+                    <p class="font-medium" :class="verifySingleResult?.valid ? 'text-md-success' : 'text-md-error'"
+                       x-text="verifySingleResult?.valid ? 'Valid' : 'Invalid'"></p>
+                    <p class="text-sm text-gray-500">Merkle proof verification complete</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
   </main>
+
+  <!-- Overlay for mobile sidebar -->
+  <div x-show="sidebarOpen" x-cloak
+       @click="sidebarOpen = false"
+       class="fixed inset-0 bg-black/50 z-30 lg:hidden transition-opacity"></div>
 
   <script>
     function dashboard() {
       return {
+        // Theme
+        darkMode: localStorage.getItem('darkMode') === 'true',
+
+        // Navigation
+        sidebarOpen: window.innerWidth >= 1024,
         activeTab: 'overview',
-        tabs: [
-          { id: 'overview', label: 'Overview' },
-          { id: 'neurons', label: 'Neurons' },
-          { id: 'graph', label: 'Graph' },
-          { id: 'inference', label: 'Inference' },
-          { id: 'attractors', label: 'Attractors' },
-          { id: 'learning', label: 'Learning' },
-          { id: 'sync', label: 'Sync' },
-          { id: 'search', label: 'Search' },
-          { id: 'ingest', label: 'Ingest' },
-          { id: 'verify', label: 'Verify' },
+        navItems: [
+          { id: 'overview', label: 'Overview', icon: 'dashboard' },
+          { id: 'neurons', label: 'Neurons', icon: 'psychology' },
+          { id: 'graph', label: 'Graph', icon: 'hub' },
+          { id: 'inference', label: 'Inference', icon: 'timeline' },
+          { id: 'attractors', label: 'Attractors', icon: 'track_changes' },
+          { id: 'learning', label: 'Learning', icon: 'school' },
+          { id: 'sync', label: 'Sync', icon: 'sync' },
+          { id: 'search', label: 'Search', icon: 'search' },
+          { id: 'ingest', label: 'Ingest', icon: 'upload_file' },
+          { id: 'verify', label: 'Verify', icon: 'verified' },
         ],
-        connected: false, lastRefresh: '', stats: {},
-        neurons: [], neuronTotal: 0, neuronPage: 0, neuronLimit: 50, neuronsLoading: false,
-        selectedNeuron: null, selectedContent: '',
+
+        // Connection
+        connected: false,
+        refreshing: false,
+        lastRefresh: '',
+        globalSearch: '',
+
+        // Data
+        stats: {},
+        recentNeurons: [],
+        neurons: [],
+        neuronTotal: 0,
+        neuronPage: 0,
+        neuronLimit: 20,
+        neuronsLoading: false,
+        selectedNeuron: null,
+        selectedContent: '',
+
+        // Graph
         graphData: { nodes: [], edges: [], stats: {} },
-        inferNeuronId: '', inferType: 'forward', inferDepth: 3, inferring: false, inferResults: null,
+        graphViewMode: 'graph',
+        graphSimulation: null,
+
+        // Inference
+        inferNeuronId: '',
+        inferType: 'forward',
+        inferDepth: 3,
+        inferring: false,
+        inferResults: null,
+
+        // Sync
         syncStatus: null,
-        searchQuery: '', searchK: 10, searchIncludeContent: true, searchResults: [], searching: false,
-        ingestText: '', ingestSourceType: 'dashboard', ingestTags: '', ingesting: false, ingestResult: null, ingestError: null,
-        verifying: false, verifyAllResult: null, verifyNeuronId: '', verifySingleResult: null, verifySingleLoading: false,
+
+        // Search
+        searchQuery: '',
+        searchK: 10,
+        searchIncludeContent: true,
+        searchResults: [],
+        searching: false,
+
+        // Ingest
+        ingestText: '',
+        ingestSourceType: 'dashboard',
+        ingestTags: '',
+        ingesting: false,
+        ingestResult: null,
+        ingestError: null,
+
+        // Verify
+        verifying: false,
+        verifyAllResult: null,
+        verifyNeuronId: '',
+        verifySingleResult: null,
+        verifySingleLoading: false,
 
         async init() {
           await this.checkHealth();
           await this.loadStats();
+          await this.loadRecentNeurons();
           setInterval(() => { if (this.activeTab === 'overview') this.loadStats(); }, 30000);
+
+          window.addEventListener('resize', () => {
+            this.sidebarOpen = window.innerWidth >= 1024;
+          });
+        },
+
+        toggleDarkMode() {
+          this.darkMode = !this.darkMode;
+          localStorage.setItem('darkMode', this.darkMode);
+        },
+
+        async refreshAll() {
+          this.refreshing = true;
+          await this.loadStats();
+          await this.loadRecentNeurons();
+          this.refreshing = false;
         },
 
         switchTab(id) {
           this.activeTab = id;
-          if (id === 'overview') this.loadStats();
+          if (id === 'overview') { this.loadStats(); this.loadRecentNeurons(); }
           else if (id === 'neurons') this.loadNeurons();
-          else if (id === 'graph') this.loadGraph();
+          else if (id === 'graph') { this.loadGraph().then(() => setTimeout(() => this.renderGraph(), 100)); }
           else if (id === 'sync') this.loadSyncStatus();
         },
 
@@ -521,65 +1054,268 @@
         },
 
         async checkHealth() { try { await this.api('GET', '/health'); this.connected = true; } catch { this.connected = false; } },
-        async loadStats() { try { this.stats = await this.api('GET', '/stats'); this.lastRefresh = new Date().toLocaleTimeString(); } catch {} },
+
+        async loadStats() {
+          try {
+            this.stats = await this.api('GET', '/stats');
+            this.lastRefresh = new Date().toLocaleTimeString();
+          } catch {}
+        },
+
+        async loadRecentNeurons() {
+          try {
+            const d = await this.api('GET', '/neurons?limit=5&offset=0');
+            this.recentNeurons = d.neurons || [];
+          } catch { this.recentNeurons = []; }
+        },
 
         async loadNeurons() {
           this.neuronsLoading = true;
           try {
             const d = await this.api('GET', `/neurons?limit=${this.neuronLimit}&offset=${this.neuronPage * this.neuronLimit}`);
-            this.neurons = d.neurons || []; this.neuronTotal = d.total || 0;
+            this.neurons = d.neurons || [];
+            this.neuronTotal = d.total || 0;
           } catch { this.neurons = []; }
           this.neuronsLoading = false;
         },
 
         async selectNeuron(n) {
-          this.selectedNeuron = n; this.selectedContent = 'Loading...';
-          try { const d = await this.api('GET', `/neurons/${n.id}/content`); this.selectedContent = d.content || ''; } catch { this.selectedContent = ''; }
+          this.selectedNeuron = n;
+          this.selectedContent = 'Loading...';
+          try {
+            const d = await this.api('GET', `/neurons/${n.id}/content`);
+            this.selectedContent = d.content || '';
+          } catch { this.selectedContent = 'Failed to load content'; }
         },
 
         prevPage() { if (this.neuronPage > 0) { this.neuronPage--; this.loadNeurons(); } },
         nextPage() { if ((this.neuronPage + 1) * this.neuronLimit < this.neuronTotal) { this.neuronPage++; this.loadNeurons(); } },
-        paginationLabel() { return `${this.neuronPage * this.neuronLimit + 1}-${Math.min((this.neuronPage + 1) * this.neuronLimit, this.neuronTotal)} of ${this.neuronTotal}`; },
+        paginationLabel() {
+          if (this.neuronTotal === 0) return 'No neurons';
+          return `${this.neuronPage * this.neuronLimit + 1}-${Math.min((this.neuronPage + 1) * this.neuronLimit, this.neuronTotal)} of ${this.neuronTotal}`;
+        },
 
-        async loadGraph() { try { this.graphData = await this.api('GET', '/graph'); } catch { this.graphData = { nodes: [], edges: [], stats: {} }; } },
+        async loadGraph() {
+          try { this.graphData = await this.api('GET', '/graph'); }
+          catch { this.graphData = { nodes: [], edges: [], stats: {} }; }
+        },
+
+        renderGraph() {
+          const container = document.getElementById('graph-container');
+          const svg = d3.select('#graph-svg');
+          if (!container || !svg.node()) return;
+
+          // Clear previous
+          svg.selectAll('*').remove();
+          if (this.graphSimulation) this.graphSimulation.stop();
+
+          const nodes = this.graphData.nodes || [];
+          const edges = this.graphData.edges || [];
+          if (nodes.length === 0) return;
+
+          const width = container.clientWidth;
+          const height = container.clientHeight;
+          const isDark = this.darkMode;
+
+          // Create node map for edge references
+          const nodeMap = new Map(nodes.map(n => [n.id, n]));
+
+          // Prepare links (D3 needs source/target as node references or ids)
+          const links = edges.map(e => ({
+            source: e.source,
+            target: e.target,
+            weight: e.weight || 0.5,
+            type: e.type || 'SEMANTIC'
+          })).filter(l => nodeMap.has(l.source) && nodeMap.has(l.target));
+
+          // Color scale for edge types
+          const edgeColors = {
+            'SEMANTIC': '#1976D2',
+            'CAUSAL': '#2E7D32',
+            'TEMPORAL': '#ED6C02',
+            'ASSOCIATIVE': '#9C27B0',
+            'HIERARCHICAL': '#D32F2F',
+            'DUPLICATE': '#757575'
+          };
+
+          // Create simulation
+          this.graphSimulation = d3.forceSimulation(nodes)
+            .force('link', d3.forceLink(links).id(d => d.id).distance(80).strength(0.5))
+            .force('charge', d3.forceManyBody().strength(-200))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .force('collision', d3.forceCollide().radius(25));
+
+          // Zoom behavior
+          const zoom = d3.zoom()
+            .scaleExtent([0.2, 4])
+            .on('zoom', (event) => g.attr('transform', event.transform));
+          svg.call(zoom);
+
+          // Main group for zoom/pan
+          const g = svg.append('g');
+
+          // Draw edges
+          const link = g.append('g')
+            .selectAll('line')
+            .data(links)
+            .join('line')
+            .attr('stroke', d => edgeColors[d.type] || '#999')
+            .attr('stroke-opacity', 0.6)
+            .attr('stroke-width', d => Math.max(1, d.weight * 3));
+
+          // Draw nodes
+          const node = g.append('g')
+            .selectAll('circle')
+            .data(nodes)
+            .join('circle')
+            .attr('r', 10)
+            .attr('fill', '#1976D2')
+            .attr('stroke', isDark ? '#424242' : '#fff')
+            .attr('stroke-width', 2)
+            .style('cursor', 'pointer')
+            .call(d3.drag()
+              .on('start', (event, d) => {
+                if (!event.active) this.graphSimulation.alphaTarget(0.3).restart();
+                d.fx = d.x; d.fy = d.y;
+              })
+              .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+              .on('end', (event, d) => {
+                if (!event.active) this.graphSimulation.alphaTarget(0);
+                d.fx = null; d.fy = null;
+              }));
+
+          // Tooltip
+          const tooltip = document.getElementById('graph-tooltip');
+          const tooltipId = document.getElementById('tooltip-id');
+          const tooltipLabel = document.getElementById('tooltip-label');
+
+          node.on('mouseenter', (event, d) => {
+            tooltip.classList.remove('hidden');
+            tooltipId.textContent = d.id.substring(0, 20) + '...';
+            tooltipLabel.textContent = d.label || 'Neuron';
+          })
+          .on('mousemove', (event) => {
+            tooltip.style.left = (event.offsetX + 15) + 'px';
+            tooltip.style.top = (event.offsetY - 10) + 'px';
+          })
+          .on('mouseleave', () => tooltip.classList.add('hidden'));
+
+          // Node labels (short)
+          const labels = g.append('g')
+            .selectAll('text')
+            .data(nodes)
+            .join('text')
+            .text(d => d.id.substring(0, 6))
+            .attr('font-size', '8px')
+            .attr('fill', isDark ? '#E6E1E5' : '#1C1B1F')
+            .attr('text-anchor', 'middle')
+            .attr('dy', 20)
+            .style('pointer-events', 'none');
+
+          // Update positions on tick
+          this.graphSimulation.on('tick', () => {
+            link
+              .attr('x1', d => d.source.x)
+              .attr('y1', d => d.source.y)
+              .attr('x2', d => d.target.x)
+              .attr('y2', d => d.target.y);
+            node.attr('cx', d => d.x).attr('cy', d => d.y);
+            labels.attr('x', d => d.x).attr('y', d => d.y);
+          });
+
+          // Initial zoom to fit
+          setTimeout(() => {
+            const bounds = g.node().getBBox();
+            if (bounds.width > 0 && bounds.height > 0) {
+              const scale = Math.min(width / bounds.width, height / bounds.height) * 0.8;
+              const tx = (width - bounds.width * scale) / 2 - bounds.x * scale;
+              const ty = (height - bounds.height * scale) / 2 - bounds.y * scale;
+              svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+            }
+          }, 500);
+        },
 
         async runInference() {
           if (!this.inferNeuronId) return;
-          this.inferring = true; this.inferResults = null;
-          try { this.inferResults = await this.api('POST', `/inference/${this.inferType}`, { neuronId: this.inferNeuronId, depth: this.inferDepth }); } catch (e) { alert(e.message); }
+          this.inferring = true;
+          this.inferResults = null;
+          try {
+            this.inferResults = await this.api('POST', `/inference/${this.inferType}`, {
+              neuronId: this.inferNeuronId,
+              depth: this.inferDepth
+            });
+          } catch (e) { alert(e.message); }
           this.inferring = false;
         },
 
-        async loadSyncStatus() { try { this.syncStatus = await this.api('GET', '/sync/status'); } catch {} },
+        async loadSyncStatus() {
+          try { this.syncStatus = await this.api('GET', '/sync/status'); } catch {}
+        },
 
         async doSearch() {
           if (!this.searchQuery) return;
-          this.searching = true; this.searchResults = [];
-          try { const d = await this.api('POST', '/search', { query: this.searchQuery, k: this.searchK, includeContent: this.searchIncludeContent }); this.searchResults = d.results || []; } catch {}
+          this.searching = true;
+          this.searchResults = [];
+          try {
+            const d = await this.api('POST', '/search', {
+              query: this.searchQuery,
+              k: this.searchK,
+              includeContent: this.searchIncludeContent
+            });
+            this.searchResults = d.results || [];
+          } catch {}
           this.searching = false;
+        },
+
+        async doGlobalSearch() {
+          if (this.globalSearch) {
+            this.searchQuery = this.globalSearch;
+            this.activeTab = 'search';
+            await this.doSearch();
+          }
         },
 
         async doIngest() {
           if (!this.ingestText) return;
-          this.ingesting = true; this.ingestResult = null; this.ingestError = null;
+          this.ingesting = true;
+          this.ingestResult = null;
+          this.ingestError = null;
           try {
             const tags = this.ingestTags.split(',').map(t => t.trim()).filter(t => t);
-            this.ingestResult = await this.api('POST', '/ingest', { text: this.ingestText, sourceType: this.ingestSourceType, tags });
-            this.ingestText = ''; this.ingestTags = '';
+            this.ingestResult = await this.api('POST', '/ingest', {
+              text: this.ingestText,
+              sourceType: this.ingestSourceType,
+              tags
+            });
+            this.ingestText = '';
+            this.ingestTags = '';
           } catch (e) { this.ingestError = e.message; }
           this.ingesting = false;
         },
 
-        async doVerifyAll() { this.verifying = true; try { this.verifyAllResult = await this.api('GET', '/verify'); } catch {} this.verifying = false; },
+        async doVerifyAll() {
+          this.verifying = true;
+          try { this.verifyAllResult = await this.api('GET', '/verify'); } catch {}
+          this.verifying = false;
+        },
+
         async doVerifySingle() {
           if (!this.verifyNeuronId) return;
-          this.verifySingleLoading = true; this.verifySingleResult = null;
+          this.verifySingleLoading = true;
+          this.verifySingleResult = null;
           try { this.verifySingleResult = await this.api('GET', `/verify/${this.verifyNeuronId}`); } catch {}
           this.verifySingleLoading = false;
         },
 
-        formatNumber(v) { return v == null || v === '--' ? '--' : Number(v).toLocaleString(); },
-        formatBytes(b) { if (b == null) return '--'; if (b === 0) return '0 B'; const u = ['B','KB','MB','GB']; const i = Math.floor(Math.log(b)/Math.log(1024)); return (b/Math.pow(1024,i)).toFixed(1) + ' ' + u[i]; },
+        formatNumber(v) {
+          return v == null || v === '--' ? '0' : Number(v).toLocaleString();
+        },
+        formatBytes(b) {
+          if (b == null || b === 0) return '0 B';
+          const u = ['B','KB','MB','GB'];
+          const i = Math.floor(Math.log(b)/Math.log(1024));
+          return (b/Math.pow(1024,i)).toFixed(1) + ' ' + u[i];
+        },
       };
     }
   </script>

@@ -959,67 +959,185 @@ async function cmdConnect(_args: string[], config: Config) {
 // ============== Commands: Benchmarks & Backup ==============
 
 async function cmdBenchmark(config: Config) {
-  log('Running NMT Benchmarks...', config);
-  log('========================\n', config);
+  log('', config);
+  log('╔════════════════════════════════════════════════════════════╗', config);
+  log('║              NMT System Benchmarks                         ║', config);
+  log('╚════════════════════════════════════════════════════════════╝', config);
+  log('', config);
 
-  const results: Record<string, number> = {};
+  const results: Record<string, any> = {};
 
-  // HNSW Benchmark
-  log('1. HNSW Index Benchmark', config);
+  // Helper: calculate percentiles
+  const percentile = (arr: number[], p: number) => {
+    const sorted = [...arr].sort((a, b) => a - b);
+    const idx = Math.ceil((p / 100) * sorted.length) - 1;
+    return sorted[Math.max(0, idx)];
+  };
+
+  // ============================================
+  // 1. HNSW Vector Search Benchmark
+  // ============================================
+  log('┌────────────────────────────────────────────────────────────┐', config);
+  log('│ 1. HNSW Vector Search                                      │', config);
+  log('└────────────────────────────────────────────────────────────┘', config);
+
   const { HNSWIndex } = await import('../src/core/hnsw-index.js');
-  const hnsw = new HNSWIndex();
 
   const dim = 384;
-  const count = 1000;
+  const counts = [1000, 10000];
 
-  const embeddings: Float32Array[] = [];
-  for (let i = 0; i < count; i++) {
-    const emb = new Float32Array(dim);
-    for (let j = 0; j < dim; j++) emb[j] = Math.random() - 0.5;
-    embeddings.push(emb);
+  for (const count of counts) {
+    // Create fresh index for each dataset size
+    const hnsw = new HNSWIndex();
+
+    log(`\n   Dataset: ${count.toLocaleString()} vectors`, config);
+
+    const embeddings: Float32Array[] = [];
+    for (let i = 0; i < count; i++) {
+      const emb = new Float32Array(dim);
+      for (let j = 0; j < dim; j++) emb[j] = Math.random() - 0.5;
+      embeddings.push(emb);
+    }
+
+    // Insert
+    const insertStart = Date.now();
+    for (let i = 0; i < count; i++) {
+      hnsw.insert(`id_${count}_${i}`, embeddings[i]);
+    }
+    const insertMs = Date.now() - insertStart;
+    log(`   Insert:  ${insertMs}ms (${(count / insertMs * 1000).toFixed(0)} vec/s)`, config);
+
+    // Search with latency distribution
+    const searchLatencies: number[] = [];
+    const searches = 100;
+    for (let i = 0; i < searches; i++) {
+      const start = performance.now();
+      hnsw.search(embeddings[i % count], 10);
+      searchLatencies.push(performance.now() - start);
+    }
+
+    const p50 = percentile(searchLatencies, 50);
+    const p99 = percentile(searchLatencies, 99);
+    log(`   Search:  p50=${p50.toFixed(2)}ms, p99=${p99.toFixed(2)}ms`, config);
+
+    results[`hnsw_${count}`] = { insertMs, p50, p99 };
   }
 
-  const insertStart = Date.now();
-  for (let i = 0; i < count; i++) {
-    hnsw.insert(`id${i}`, embeddings[i]);
-  }
-  results.insertMs = Date.now() - insertStart;
-  log(`   Insert ${count} vectors: ${results.insertMs}ms (${(count / results.insertMs * 1000).toFixed(0)} vec/s)`, config);
+  // ============================================
+  // 2. Merkle Verification Benchmark
+  // ============================================
+  log('\n┌────────────────────────────────────────────────────────────┐', config);
+  log('│ 2. Merkle Tree Verification                                │', config);
+  log('└────────────────────────────────────────────────────────────┘', config);
 
-  const searchStart = Date.now();
-  const searches = 100;
-  for (let i = 0; i < searches; i++) {
-    hnsw.search(embeddings[i % count], 10);
-  }
-  results.searchMs = Date.now() - searchStart;
-  log(`   Search ${searches} queries: ${results.searchMs}ms (${(searches / results.searchMs * 1000).toFixed(0)} q/s)`, config);
-
-  // Merkle Benchmark
-  log('\n2. Merkle Tree Benchmark', config);
   const { MerkleEngine } = await import('../src/core/merkle-engine.js');
   const merkle = new MerkleEngine();
 
-  const leaves = Array.from({ length: 1000 }, (_, i) => `leaf${i}`);
+  const leaves = Array.from({ length: 1000 }, (_, i) => `leaf-content-${i}-with-some-data`);
 
+  // Build tree
   const treeStart = Date.now();
   const tree = merkle.buildTree(leaves);
-  results.treeBuildMs = Date.now() - treeStart;
-  log(`   Build tree (${leaves.length} leaves): ${results.treeBuildMs}ms`, config);
+  const treeBuildMs = Date.now() - treeStart;
+  log(`\n   Build tree (${leaves.length} leaves): ${treeBuildMs}ms`, config);
 
-  const proofStart = Date.now();
+  // Proof generation
+  const proofLatencies: number[] = [];
   for (let i = 0; i < 100; i++) {
+    const start = performance.now();
     merkle.generateProof(tree, i);
+    proofLatencies.push(performance.now() - start);
   }
-  results.proofGenMs = Date.now() - proofStart;
-  log(`   Generate 100 proofs: ${results.proofGenMs}ms`, config);
+  const proofP50 = percentile(proofLatencies, 50);
+  log(`   Proof generation: p50=${proofP50.toFixed(3)}ms`, config);
 
+  // Verify proof
+  const proof = merkle.generateProof(tree, 50);
+  const verifyLatencies: number[] = [];
+  for (let i = 0; i < 100; i++) {
+    const start = performance.now();
+    merkle.verifyProof(proof);
+    verifyLatencies.push(performance.now() - start);
+  }
+  const verifyP50 = percentile(verifyLatencies, 50);
+  log(`   Proof verify: p50=${verifyP50.toFixed(3)}ms`, config);
+
+  results.merkle = { treeBuildMs, proofP50, verifyP50 };
+
+  // ============================================
+  // 3. End-to-End Operations (if data exists)
+  // ============================================
+  log('\n┌────────────────────────────────────────────────────────────┐', config);
+  log('│ 3. End-to-End Operations                                   │', config);
+  log('└────────────────────────────────────────────────────────────┘', config);
+
+  try {
+    const ctx = await bootstrap(config);
+    const neuronCount = await ctx.neuronStore.getNeuronCount();
+
+    if (neuronCount > 0) {
+      log(`\n   Dataset: ${neuronCount} neurons in database`, config);
+
+      // Search benchmark
+      const searchQueries = ['machine learning', 'software development', 'data analysis', 'user preferences'];
+      const e2eSearchLatencies: number[] = [];
+
+      for (let i = 0; i < 20; i++) {
+        const query = searchQueries[i % searchQueries.length];
+        const start = performance.now();
+        await ctx.queryService.search(query, { k: 10, includeContent: false });
+        e2eSearchLatencies.push(performance.now() - start);
+      }
+
+      const e2eP50 = percentile(e2eSearchLatencies, 50);
+      const e2eP99 = percentile(e2eSearchLatencies, 99);
+      log(`   Semantic search: p50=${e2eP50.toFixed(1)}ms, p99=${e2eP99.toFixed(1)}ms`, config);
+
+      results.e2e = { searchP50: e2eP50, searchP99: e2eP99, neuronCount };
+    } else {
+      log('\n   (No data in database - skipping E2E tests)', config);
+      log('   Run: nmt ingest <file> to add test data', config);
+    }
+
+    await shutdown();
+  } catch {
+    log('\n   (Database not initialized - skipping E2E tests)', config);
+  }
+
+  // ============================================
   // Summary
-  log('\nBenchmark Summary', config, results);
-  log('====================', config);
-  log(`HNSW Insert: ${(count / results.insertMs * 1000).toFixed(0)} vectors/sec`, config);
-  log(`HNSW Search: ${(searches / results.searchMs * 1000).toFixed(0)} queries/sec`, config);
-  log(`Merkle Build: ${results.treeBuildMs}ms for ${leaves.length} leaves`, config);
-  log(`Proof Gen: ${(100 / results.proofGenMs * 1000).toFixed(0)} proofs/sec`, config);
+  // ============================================
+  log('\n╔════════════════════════════════════════════════════════════╗', config);
+  log('║                    BENCHMARK SUMMARY                        ║', config);
+  log('╚════════════════════════════════════════════════════════════╝', config);
+  log('', config);
+
+  log('HNSW Vector Search (1K vectors):', config);
+  log(`  - Search latency p50: ${results.hnsw_1000?.p50.toFixed(2)}ms`, config);
+  log(`  - Search latency p99: ${results.hnsw_1000?.p99.toFixed(2)}ms`, config);
+  log('', config);
+
+  log('HNSW Vector Search (10K vectors):', config);
+  log(`  - Search latency p50: ${results.hnsw_10000?.p50.toFixed(2)}ms`, config);
+  log(`  - Search latency p99: ${results.hnsw_10000?.p99.toFixed(2)}ms`, config);
+  log('', config);
+
+  log('Merkle Verification:', config);
+  log(`  - Tree build (1K leaves): ${results.merkle?.treeBuildMs}ms`, config);
+  log(`  - Proof generation: ${results.merkle?.proofP50.toFixed(3)}ms`, config);
+  log(`  - Proof verification: ${results.merkle?.verifyP50.toFixed(3)}ms`, config);
+  log('', config);
+
+  if (results.e2e) {
+    log(`End-to-End (${results.e2e.neuronCount} neurons):`, config);
+    log(`  - Semantic search p50: ${results.e2e.searchP50.toFixed(1)}ms`, config);
+    log(`  - Semantic search p99: ${results.e2e.searchP99.toFixed(1)}ms`, config);
+    log('', config);
+  }
+
+  if (config.json) {
+    log('', config, results);
+  }
 }
 
 
