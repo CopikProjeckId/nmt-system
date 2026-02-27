@@ -25,6 +25,7 @@ Usage: nmt <command> [options]
 Core Commands:
   init                  Initialize NMT data directory
   dashboard             Start lightweight web admin dashboard
+  mcp                   Start MCP (Model Context Protocol) server for Claude Code
 
   ingest <file>         Ingest a text file into the knowledge graph
   ingest-text <text>    Ingest text directly from command line
@@ -62,6 +63,7 @@ Environment Variables:
 Examples:
   nmt init
   nmt dashboard -p 4000
+  nmt mcp                                 # Start MCP server for Claude Code
   nmt ingest ./docs/article.txt -t "ml,tutorial"
   nmt search "machine learning" -k 5
   nmt stats
@@ -72,6 +74,10 @@ Examples:
   nmt attractor create "goal" --strength 0.8
   nmt learn interaction --input "..." --output "..."
   nmt dimension expand --name "concept" --category "custom"
+
+  # Claude Code Integration (MCP)
+  # Add to ~/.claude/settings.json:
+  # { "mcpServers": { "nmt": { "command": "nmt", "args": ["mcp"] } } }
 `;
 
 // ============== Config ==============
@@ -438,6 +444,34 @@ async function cmdDashboard(config: Config) {
     log(`\nPress Ctrl+C to stop\n`, config);
   } catch (error: any) {
     console.error('Failed to start dashboard:', error.message);
+    process.exit(1);
+  }
+}
+
+// ============== Commands: MCP Server ==============
+
+async function cmdMcp(config: Config) {
+  log(`Starting NMT MCP Server...`, config);
+  log(`Data directory: ${resolve(config.dataDir)}`, config);
+
+  try {
+    const { NMTMCPServer } = await import('../src/mcp/server.js');
+    const server = new NMTMCPServer(config.dataDir);
+
+    // Handle shutdown signals
+    const shutdown = async () => {
+      console.error('\nShutting down MCP server...');
+      process.exit(0);
+    };
+
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+
+    // Initialize and start
+    await server.init();
+    await server.start();
+  } catch (error: any) {
+    console.error('Failed to start MCP server:', error.message);
     process.exit(1);
   }
 }
@@ -1283,6 +1317,11 @@ async function main() {
       break;
     case 'sync':
       await cmdSyncDispatch(args, config);
+      break;
+
+    // MCP Server (Claude Code Integration)
+    case 'mcp':
+      await cmdMcp(config);
       break;
 
     case 'help':

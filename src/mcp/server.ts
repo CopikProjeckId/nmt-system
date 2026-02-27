@@ -12,7 +12,63 @@ import {
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+
+// ============================================================
+// NMT System Instructions for AI Agents
+// ============================================================
+const NMT_SYSTEM_INSTRUCTIONS = `
+# NMT (Neuron Merkle Tree) - Verifiable Semantic Memory System
+
+You have access to NMT, a persistent semantic memory system that stores and retrieves information using neural embeddings and cryptographic verification.
+
+## When to Use NMT
+
+**USE NMT when:**
+- User wants to remember something for future sessions ("remember this", "save this for later")
+- You learn important information about the user (preferences, context, decisions)
+- User shares documents, code snippets, or knowledge worth preserving
+- You need to recall past conversations or stored knowledge
+- User asks "do you remember..." or "what did I tell you about..."
+
+**DON'T USE NMT for:**
+- Temporary information only needed in current conversation
+- Sensitive data (passwords, secrets, API keys)
+- Very short or trivial information
+
+## Tool Usage Patterns
+
+### Pattern 1: Save Important Information
+When user shares valuable information:
+1. Use \`nmt_save\` with appropriate tags
+2. Confirm storage with the returned neuronId
+
+### Pattern 2: Recall Past Knowledge
+When user asks about past information:
+1. Use \`nmt_search\` with semantic query (not exact keywords)
+2. Review results and synthesize relevant information
+3. If needed, use \`nmt_get\` for full content of specific neurons
+
+### Pattern 3: Build Knowledge Connections
+When information relates to existing knowledge:
+1. Use \`nmt_search\` to find related neurons
+2. Use \`nmt_connect\` to create semantic/causal links
+3. This helps future retrieval through association
+
+### Pattern 3: Verify Data Integrity
+When accuracy is critical:
+1. Use \`nmt_verify\` to check if data was tampered
+2. Merkle tree verification ensures cryptographic integrity
+
+## Best Practices
+
+1. **Tag wisely**: Use descriptive tags like ["user-preference", "coding-style"] or ["project-x", "architecture"]
+2. **Search semantically**: Query by meaning, not exact words. "coding habits" will find "programming preferences"
+3. **Connect related concepts**: Build a knowledge graph by linking neurons
+4. **Check stats periodically**: Use nmt_stats to monitor memory usage
+`.trim();
 
 import { ChunkEngine } from '../core/chunk-engine.js';
 import { MerkleEngine } from '../core/merkle-engine.js';
@@ -60,7 +116,9 @@ export class NMTMCPServer {
         capabilities: {
           tools: {},
           resources: {},
+          prompts: {},
         },
+        instructions: NMT_SYSTEM_INSTRUCTIONS,
       }
     );
 
@@ -124,23 +182,78 @@ export class NMTMCPServer {
    * Setup MCP handlers
    */
   private setupHandlers(): void {
-    // List available tools
+    // List prompts - provides system instructions and usage guides
+    this.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+      prompts: [
+        {
+          name: 'nmt_guide',
+          description: 'Complete guide for using NMT memory system effectively',
+        },
+        {
+          name: 'nmt_quick_start',
+          description: 'Quick start: basic save and search operations',
+        },
+      ],
+    }));
+
+    // Get prompt content
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+      const { name } = request.params;
+
+      if (name === 'nmt_guide') {
+        return {
+          messages: [
+            {
+              role: 'user',
+              content: { type: 'text', text: NMT_SYSTEM_INSTRUCTIONS },
+            },
+          ],
+        };
+      }
+
+      if (name === 'nmt_quick_start') {
+        return {
+          messages: [
+            {
+              role: 'user',
+              content: {
+                type: 'text',
+                text: `NMT Quick Start:
+1. Save: nmt_save(text="important info", tags=["category"])
+2. Search: nmt_search(query="what I saved about...")
+3. Get full content: nmt_get(neuronId="...")
+4. Verify integrity: nmt_verify(neuronId="...")`,
+              },
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unknown prompt: ${name}`);
+    });
+
+    // List available tools with comprehensive descriptions
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
           name: 'nmt_save',
-          description: '텍스트를 NMT에 저장합니다. 저장된 텍스트는 나중에 의미 검색으로 찾을 수 있습니다.',
+          description: `Save text to persistent semantic memory. Use when:
+- User says "remember this", "save for later", "keep this in mind"
+- You learn important user preferences, decisions, or context
+- User shares documents, code, or knowledge worth preserving
+Returns a neuronId for future reference. Tags help with organization.
+Example: nmt_save(text="User prefers TypeScript over JavaScript", tags=["preference", "coding"])`,
           inputSchema: {
             type: 'object',
             properties: {
               text: {
                 type: 'string',
-                description: '저장할 텍스트',
+                description: 'The text content to save. Can be any length - will be chunked automatically.',
               },
               tags: {
                 type: 'array',
                 items: { type: 'string' },
-                description: '태그 목록 (선택사항)',
+                description: 'Categorical tags for organization. Examples: ["project-x", "architecture"], ["user-preference", "ui"]',
               },
             },
             required: ['text'],
@@ -148,17 +261,22 @@ export class NMTMCPServer {
         },
         {
           name: 'nmt_search',
-          description: '의미적으로 유사한 내용을 검색합니다. 키워드가 아닌 의미 기반 검색입니다.',
+          description: `Semantic search across all stored memories. Use when:
+- User asks "do you remember...", "what did I tell you about..."
+- You need to recall past conversations or stored knowledge
+- Looking for related information before making decisions
+Searches by MEANING, not keywords. "coding preferences" finds "programming style choices".
+Example: nmt_search(query="user's favorite programming language", limit=5)`,
           inputSchema: {
             type: 'object',
             properties: {
               query: {
                 type: 'string',
-                description: '검색할 내용',
+                description: 'Semantic search query. Describe what you are looking for by meaning, not exact words.',
               },
               limit: {
                 type: 'number',
-                description: '최대 결과 개수 (기본값: 10)',
+                description: 'Maximum results to return (default: 10). Use lower values for focused searches.',
               },
             },
             required: ['query'],
@@ -166,13 +284,14 @@ export class NMTMCPServer {
         },
         {
           name: 'nmt_get',
-          description: '특정 뉴런의 내용을 가져옵니다.',
+          description: `Retrieve full content of a specific neuron by ID. Use after nmt_search to get complete text when the search result snippet is insufficient.
+Example: nmt_get(neuronId="abc-123-def")`,
           inputSchema: {
             type: 'object',
             properties: {
               neuronId: {
                 type: 'string',
-                description: '뉴런 ID',
+                description: 'The neuron ID returned from nmt_save or nmt_search',
               },
             },
             required: ['neuronId'],
@@ -180,13 +299,18 @@ export class NMTMCPServer {
         },
         {
           name: 'nmt_verify',
-          description: '데이터의 무결성을 검증합니다. 위변조 여부를 확인합니다.',
+          description: `Cryptographically verify data integrity using Merkle tree proofs. Use when:
+- Data accuracy is critical (legal, financial, security contexts)
+- User questions if stored data was modified
+- Auditing or compliance requirements
+Returns valid:true if data is untampered.
+Example: nmt_verify(neuronId="abc-123-def")`,
           inputSchema: {
             type: 'object',
             properties: {
               neuronId: {
                 type: 'string',
-                description: '검증할 뉴런 ID',
+                description: 'The neuron ID to verify for tampering',
               },
             },
             required: ['neuronId'],
@@ -194,22 +318,27 @@ export class NMTMCPServer {
         },
         {
           name: 'nmt_connect',
-          description: '두 뉴런을 연결합니다.',
+          description: `Create explicit connections between neurons to build a knowledge graph. Connection types:
+- semantic: conceptually related (e.g., "TypeScript" ↔ "JavaScript")
+- reference: one cites/mentions the other
+- temporal: time-based sequence (before/after)
+- causal: cause and effect relationship
+Example: nmt_connect(sourceId="abc", targetId="def", type="causal")`,
           inputSchema: {
             type: 'object',
             properties: {
               sourceId: {
                 type: 'string',
-                description: '시작 뉴런 ID',
+                description: 'Source neuron ID (the "from" node)',
               },
               targetId: {
                 type: 'string',
-                description: '대상 뉴런 ID',
+                description: 'Target neuron ID (the "to" node)',
               },
               type: {
                 type: 'string',
                 enum: ['semantic', 'reference', 'temporal', 'causal'],
-                description: '연결 유형',
+                description: 'The type of relationship between neurons',
               },
             },
             required: ['sourceId', 'targetId', 'type'],
@@ -217,17 +346,18 @@ export class NMTMCPServer {
         },
         {
           name: 'nmt_related',
-          description: '특정 뉴런과 연결된 관련 뉴런들을 찾습니다.',
+          description: `Find neurons semantically related to a given neuron. Useful for exploring the knowledge graph and discovering connections.
+Example: nmt_related(neuronId="abc-123", depth=2)`,
           inputSchema: {
             type: 'object',
             properties: {
               neuronId: {
                 type: 'string',
-                description: '뉴런 ID',
+                description: 'The neuron ID to find related content for',
               },
               depth: {
                 type: 'number',
-                description: '탐색 깊이 (기본값: 2)',
+                description: 'How many connection hops to traverse (default: 2)',
               },
             },
             required: ['neuronId'],
@@ -235,7 +365,8 @@ export class NMTMCPServer {
         },
         {
           name: 'nmt_stats',
-          description: 'NMT 시스템 통계를 가져옵니다.',
+          description: `Get current NMT system statistics including neuron count, connections, and storage usage. Useful for monitoring memory growth.
+Example: nmt_stats()`,
           inputSchema: {
             type: 'object',
             properties: {},
@@ -243,13 +374,17 @@ export class NMTMCPServer {
         },
         {
           name: 'nmt_cluster',
-          description: '저장된 뉴런들을 클러스터링합니다.',
+          description: `Group neurons into semantic clusters using K-means. Useful for:
+- Discovering themes in stored knowledge
+- Organizing large amounts of information
+- Finding unexpected connections
+Example: nmt_cluster(k=5) groups all neurons into 5 semantic clusters`,
           inputSchema: {
             type: 'object',
             properties: {
               k: {
                 type: 'number',
-                description: '클러스터 개수',
+                description: 'Number of clusters to create. Start with 3-5 for small datasets.',
               },
             },
             required: ['k'],
@@ -448,7 +583,8 @@ export class NMTMCPServer {
 
           case 'nmt_related': {
             const { neuronId, depth = 2 } = args as { neuronId: string; depth?: number };
-            const results = await this.queryService.searchSimilarTo(neuronId, { k: 10 });
+            // depth used to scale result count (more depth = more results to explore)
+            const results = await this.queryService.searchSimilarTo(neuronId, { k: 5 * depth });
             return {
               content: [
                 {
@@ -546,16 +682,23 @@ export class NMTMCPServer {
   }
 }
 
-// Main entry point
-const server = new NMTMCPServer(process.env.NMT_DATA_DIR || './data');
+// Auto-start only when run directly (not imported)
+// Check if this module is the main entry point
+const isMainModule = import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}` ||
+                     process.argv[1]?.endsWith('server.js') ||
+                     process.argv[1]?.endsWith('server.ts');
 
-server.start().catch((error) => {
-  console.error('Failed to start NMT MCP Server:', error);
-  process.exit(1);
-});
+if (isMainModule) {
+  const server = new NMTMCPServer(process.env.NMT_DATA_DIR || './data');
 
-// Handle shutdown
-process.on('SIGINT', async () => {
-  await server.close();
-  process.exit(0);
-});
+  server.start().catch((error) => {
+    console.error('Failed to start NMT MCP Server:', error);
+    process.exit(1);
+  });
+
+  // Handle shutdown
+  process.on('SIGINT', async () => {
+    await server.close();
+    process.exit(0);
+  });
+}

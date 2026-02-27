@@ -649,15 +649,18 @@ export class AttractorModel {
   }
 
   /**
-   * Calculate heuristic for A* (semantic distance to goal)
+   * Calculate admissible heuristic for A* (semantic distance to goal)
    *
    * Uses 1 - cosine_similarity as distance metric.
-   * This heuristic is admissible for semantic spaces.
+   * Clamped to [0, 1] to ensure admissibility (never overestimates).
+   *
+   * Note: Raw cosine similarity ranges [-1, 1], so 1 - similarity can be up to 2.
+   * Without clamping, this would violate A* admissibility when similarity < 0.
    */
   private calculateHeuristic(embedding: Embedding384, goalEmbedding: Embedding384): number {
     const similarity = cosineSimilarity(embedding, goalEmbedding);
-    // Distance = 1 - similarity, bounded [0, 2] for cosine
-    return 1 - similarity;
+    // Clamp to [0, 1] for admissibility: h(n) must never overestimate actual cost
+    return Math.min(1, Math.max(0, 1 - similarity));
   }
 
   /**

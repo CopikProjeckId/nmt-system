@@ -387,34 +387,44 @@ export class NeuronStore {
 
   /**
    * Get all synapses from a neuron
+   * Optimized: Uses range query instead of full scan - O(k) instead of O(n)
    */
   async getOutgoingSynapses(neuronId: UUID): Promise<Synapse[]> {
     this.ensureInitialized();
 
     const synapses: Synapse[] = [];
-    for await (const [key] of this.synapseDb.iterator()) {
-      if (key.startsWith(`source:${neuronId}:`)) {
-        const synapseId = key.split(':')[2];
-        const synapse = await this.getSynapse(synapseId);
-        if (synapse) synapses.push(synapse);
-      }
+    const prefix = `source:${neuronId}:`;
+
+    // Range query: only scan keys with matching prefix
+    for await (const [key] of this.synapseDb.iterator({
+      gte: prefix,
+      lt: prefix + '\xFF'  // '\xFF' is the highest byte, so this covers all keys with prefix
+    })) {
+      const synapseId = key.slice(prefix.length);
+      const synapse = await this.getSynapse(synapseId);
+      if (synapse) synapses.push(synapse);
     }
     return synapses;
   }
 
   /**
    * Get all synapses to a neuron
+   * Optimized: Uses range query instead of full scan - O(k) instead of O(n)
    */
   async getIncomingSynapses(neuronId: UUID): Promise<Synapse[]> {
     this.ensureInitialized();
 
     const synapses: Synapse[] = [];
-    for await (const [key] of this.synapseDb.iterator()) {
-      if (key.startsWith(`target:${neuronId}:`)) {
-        const synapseId = key.split(':')[2];
-        const synapse = await this.getSynapse(synapseId);
-        if (synapse) synapses.push(synapse);
-      }
+    const prefix = `target:${neuronId}:`;
+
+    // Range query: only scan keys with matching prefix
+    for await (const [key] of this.synapseDb.iterator({
+      gte: prefix,
+      lt: prefix + '\xFF'
+    })) {
+      const synapseId = key.slice(prefix.length);
+      const synapse = await this.getSynapse(synapseId);
+      if (synapse) synapses.push(synapse);
     }
     return synapses;
   }

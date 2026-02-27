@@ -544,21 +544,55 @@ export class NeuronGraphManager {
     paths: NeuronPath[],
     filter?: (neuron: NeuronNode, synapse: Synapse) => boolean
   ): Promise<void> {
-    // Priority queue based on weight (higher weight = higher priority)
-    const pq: Array<{
+    // Binary heap-based priority queue for O(log n) operations
+    type PQItem = {
       id: UUID;
       depth: number;
       path: UUID[];
       synapses: Synapse[];
       weight: number;
-    }> = [{ id: startId, depth: 0, path: [startId], synapses: [], weight: 0 }];
+    };
 
+    // Max-heap implementation (higher weight = higher priority)
+    const heap: PQItem[] = [];
+
+    const heapPush = (item: PQItem) => {
+      heap.push(item);
+      let i = heap.length - 1;
+      while (i > 0) {
+        const parent = Math.floor((i - 1) / 2);
+        if (heap[parent].weight >= heap[i].weight) break;
+        [heap[parent], heap[i]] = [heap[i], heap[parent]];
+        i = parent;
+      }
+    };
+
+    const heapPop = (): PQItem | undefined => {
+      if (heap.length === 0) return undefined;
+      const result = heap[0];
+      const last = heap.pop()!;
+      if (heap.length > 0) {
+        heap[0] = last;
+        let i = 0;
+        while (true) {
+          const left = 2 * i + 1;
+          const right = 2 * i + 2;
+          let largest = i;
+          if (left < heap.length && heap[left].weight > heap[largest].weight) largest = left;
+          if (right < heap.length && heap[right].weight > heap[largest].weight) largest = right;
+          if (largest === i) break;
+          [heap[i], heap[largest]] = [heap[largest], heap[i]];
+          i = largest;
+        }
+      }
+      return result;
+    };
+
+    heapPush({ id: startId, depth: 0, path: [startId], synapses: [], weight: 0 });
     visited.add(startId);
 
-    while (pq.length > 0) {
-      // Sort by weight descending
-      pq.sort((a, b) => b.weight - a.weight);
-      const { id, depth, path, synapses, weight } = pq.shift()!;
+    while (heap.length > 0) {
+      const { id, depth, path, synapses, weight } = heapPop()!;
 
       if (depth >= maxDepth) {
         const neurons = await this.getNeuronsForPath(path);
@@ -580,7 +614,7 @@ export class NeuronGraphManager {
         visited.add(synapse.targetId);
         hasUnvisited = true;
 
-        pq.push({
+        heapPush({
           id: synapse.targetId,
           depth: depth + 1,
           path: [...path, synapse.targetId],

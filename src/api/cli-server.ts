@@ -622,6 +622,176 @@ export class CLIDashboardServer {
       }
     });
 
+    // ----------------------------------------------------------------
+    // 14. GET /graph - Full graph data for visualization
+    // ----------------------------------------------------------------
+    api.get('/graph', async (_req: Request, res: Response, next: NextFunction) => {
+      try {
+        this.ensureInitialized();
+
+        const neuronIds = await this.neuronStore.getAllNeuronIds();
+        const nodes: Array<{ id: string; label: string; tags: string[] }> = [];
+        const edges: Array<{ source: string; target: string; weight: number; type: string }> = [];
+
+        for (const id of neuronIds) {
+          const neuron = await this.neuronStore.getNeuron(id);
+          if (neuron) {
+            nodes.push({
+              id: neuron.id,
+              label: neuron.metadata.sourceType || 'unknown',
+              tags: neuron.metadata.tags || [],
+            });
+
+            // Get synapses for edges
+            const synapses = await this.neuronStore.getOutgoingSynapses(id);
+            for (const synapse of synapses) {
+              edges.push({
+                source: synapse.sourceId,
+                target: synapse.targetId,
+                weight: synapse.weight,
+                type: synapse.type,
+              });
+            }
+          }
+        }
+
+        res.json({ nodes, edges, stats: { nodeCount: nodes.length, edgeCount: edges.length } });
+      } catch (err) {
+        next(err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // 15. POST /inference/:type - Run inference
+    // ----------------------------------------------------------------
+    api.post('/inference/:type', async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        this.ensureInitialized();
+
+        const { type } = req.params;
+        const { neuronId, targetId, depth = 3 } = req.body;
+
+        if (!neuronId) {
+          return res.status(400).json({ error: 'neuronId is required' });
+        }
+
+        const neuron = await this.neuronStore.getNeuron(neuronId);
+        if (!neuron) {
+          return res.status(404).json({ error: 'Neuron not found' });
+        }
+
+        // Simple graph-based inference simulation
+        const visited = new Set<string>();
+        const results: Array<{ id: string; distance: number; path: string[] }> = [];
+
+        const traverse = async (currentId: string, currentDepth: number, path: string[]) => {
+          if (currentDepth > depth || visited.has(currentId)) return;
+          visited.add(currentId);
+
+          const synapses = type === 'backward'
+            ? await this.neuronStore.getIncomingSynapses(currentId)
+            : await this.neuronStore.getOutgoingSynapses(currentId);
+          for (const synapse of synapses) {
+            const nextId = type === 'backward' ? synapse.sourceId : synapse.targetId;
+
+            if (!visited.has(nextId)) {
+              results.push({
+                id: nextId,
+                distance: currentDepth + 1,
+                path: [...path, nextId],
+              });
+              await traverse(nextId, currentDepth + 1, [...path, nextId]);
+            }
+          }
+        };
+
+        await traverse(neuronId, 0, [neuronId]);
+
+        return res.json({
+          type,
+          sourceId: neuronId,
+          targetId: targetId || null,
+          depth,
+          results: results.slice(0, 50),
+          totalFound: results.length,
+        });
+      } catch (err) {
+        return next(err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // 16. GET /attractors - List attractors (placeholder)
+    // ----------------------------------------------------------------
+    api.get('/attractors', async (_req: Request, res: Response, next: NextFunction) => {
+      try {
+        // Attractors are managed in-memory by the orchestrator
+        // Return placeholder for dashboard
+        res.json({
+          attractors: [],
+          message: 'Attractors are managed via CLI. Use: nmt attractor list',
+        });
+      } catch (err) {
+        next(err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // 17. GET /sync/status - Sync status
+    // ----------------------------------------------------------------
+    api.get('/sync/status', async (_req: Request, res: Response, next: NextFunction) => {
+      try {
+        this.ensureInitialized();
+
+        const neuronCount = (await this.neuronStore.getAllNeuronIds()).length;
+
+        res.json({
+          nodeId: 'local',
+          sequence: 0,
+          merkleRoot: null,
+          neuronCount,
+          lastSync: null,
+          peers: [],
+        });
+      } catch (err) {
+        next(err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // 18. GET /learning/stats - Learning statistics
+    // ----------------------------------------------------------------
+    api.get('/learning/stats', async (_req: Request, res: Response, next: NextFunction) => {
+      try {
+        res.json({
+          sessions: 0,
+          totalExtractions: 0,
+          patterns: 0,
+          outcomes: 0,
+          message: 'Learning is managed via CLI. Use: nmt learn session stats',
+        });
+      } catch (err) {
+        next(err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // 19. GET /probabilistic/stats - Probabilistic system stats
+    // ----------------------------------------------------------------
+    api.get('/probabilistic/stats', async (_req: Request, res: Response, next: NextFunction) => {
+      try {
+        res.json({
+          totalNeurons: 0,
+          withStates: 0,
+          avgUncertainty: 0,
+          entangledPairs: 0,
+          message: 'Probabilistic features managed via CLI. Use: nmt prob metrics',
+        });
+      } catch (err) {
+        next(err);
+      }
+    });
+
     // Mount all API routes
     this.app.use('/api/v1', api);
   }

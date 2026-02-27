@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NMT Dashboard Lite</title>
+  <title>NMT Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script>
@@ -32,7 +32,7 @@
     <div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
       <div class="flex items-center gap-3">
         <h1 class="text-lg font-bold text-gray-900 tracking-tight">NMT Dashboard</h1>
-        <span class="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">Lite</span>
+        <span class="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">v1.0</span>
       </div>
       <div class="flex items-center gap-3">
         <span x-show="connected" x-cloak class="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
@@ -48,7 +48,7 @@
   </header>
 
   <!-- Tab Navigation -->
-  <nav class="bg-white border-b border-gray-200">
+  <nav class="bg-white border-b border-gray-200 overflow-x-auto">
     <div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex gap-0 -mb-px">
         <template x-for="tab in tabs" :key="tab.id">
@@ -57,7 +57,7 @@
             :class="activeTab === tab.id
               ? 'border-indigo-600 text-indigo-600 font-semibold'
               : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 font-medium'"
-            class="px-4 py-3 text-sm border-b-2 transition-colors whitespace-nowrap"
+            class="px-3 py-3 text-sm border-b-2 transition-colors whitespace-nowrap"
             x-text="tab.label"
           ></button>
         </template>
@@ -68,612 +68,397 @@
   <!-- Main Content Area -->
   <main class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
-    <!-- ============================================================ -->
-    <!-- TAB 1: OVERVIEW -->
-    <!-- ============================================================ -->
+    <!-- TAB: OVERVIEW -->
     <section x-show="activeTab === 'overview'" x-cloak>
       <div class="flex items-center justify-between mb-5">
         <h2 class="text-base font-semibold text-gray-900">System Overview</h2>
         <span class="text-xs text-gray-400" x-text="lastRefresh ? 'Updated ' + lastRefresh : ''"></span>
       </div>
-
-      <!-- Stat Cards -->
-      <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-        <!-- Neurons -->
-        <div class="bg-gray-50 border border-gray-200 rounded-lg p-5">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
           <p class="text-2xl font-bold text-gray-900" x-text="formatNumber(stats.neurons ?? '--')"></p>
           <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Neurons</p>
         </div>
-        <!-- Synapses -->
-        <div class="bg-gray-50 border border-gray-200 rounded-lg p-5">
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
           <p class="text-2xl font-bold text-gray-900" x-text="formatNumber(stats.synapses ?? '--')"></p>
           <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Synapses</p>
         </div>
-        <!-- Chunks -->
-        <div class="bg-gray-50 border border-gray-200 rounded-lg p-5">
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
           <p class="text-2xl font-bold text-gray-900" x-text="formatNumber(stats.chunks?.total ?? '--')"></p>
           <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Chunks</p>
         </div>
-        <!-- Total Size -->
-        <div class="bg-gray-50 border border-gray-200 rounded-lg p-5">
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
           <p class="text-2xl font-bold text-gray-900" x-text="formatBytes(stats.chunks?.totalSize)"></p>
           <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Total Size</p>
         </div>
-        <!-- HNSW Vectors -->
-        <div class="bg-gray-50 border border-gray-200 rounded-lg p-5">
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
           <p class="text-2xl font-bold text-gray-900" x-text="formatNumber(stats.hnsw?.totalNodes ?? '--')"></p>
           <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">HNSW Vectors</p>
         </div>
-        <!-- HNSW Layers -->
-        <div class="bg-gray-50 border border-gray-200 rounded-lg p-5">
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
           <p class="text-2xl font-bold text-gray-900" x-text="stats.hnsw?.maxLayer ?? '--'"></p>
-          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">HNSW Max Layer</p>
+          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">HNSW Layers</p>
+        </div>
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
+          <p class="text-2xl font-bold text-gray-900" x-text="stats.storage?.backend ?? '--'"></p>
+          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Storage</p>
+        </div>
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
+          <p class="text-2xl font-bold text-gray-900" x-text="formatBytes(stats.chunks?.avgSize)"></p>
+          <p class="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Avg Chunk</p>
         </div>
       </div>
-
-      <!-- Storage Info -->
       <div class="bg-white border border-gray-200 rounded-lg p-5">
-        <h3 class="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Storage</h3>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <span class="text-xs text-gray-500">Backend</span>
-            <p class="text-sm font-medium text-gray-900 font-mono" x-text="stats.storage?.backend ?? '--'"></p>
-          </div>
-          <div>
-            <span class="text-xs text-gray-500">Data Directory</span>
-            <p class="text-sm font-medium text-gray-900 font-mono break-all" x-text="stats.storage?.dataDir ?? '--'"></p>
-          </div>
-          <div>
-            <span class="text-xs text-gray-500">Average Chunk Size</span>
-            <p class="text-sm font-medium text-gray-900 font-mono" x-text="formatBytes(stats.chunks?.avgSize)"></p>
-          </div>
-        </div>
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Data Directory</h3>
+        <p class="text-sm font-mono text-gray-900 break-all" x-text="stats.storage?.dataDir ?? '--'"></p>
       </div>
     </section>
 
-    <!-- ============================================================ -->
-    <!-- TAB 2: NEURONS -->
-    <!-- ============================================================ -->
+    <!-- TAB: NEURONS -->
     <section x-show="activeTab === 'neurons'" x-cloak>
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold text-gray-900">
-          Neurons
-          <span class="text-sm font-normal text-gray-500 ml-1" x-show="neuronTotal > 0" x-text="'(' + neuronTotal + ' total)'"></span>
-        </h2>
-        <div class="flex items-center gap-2">
-          <button @click="loadNeurons()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50 transition-colors">
-            Refresh
-          </button>
-        </div>
+        <h2 class="text-base font-semibold text-gray-900">Neurons <span class="text-sm font-normal text-gray-500" x-text="'(' + neuronTotal + ')'"></span></h2>
+        <button @click="loadNeurons()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50">Refresh</button>
       </div>
-
       <div class="flex gap-4">
-        <!-- Neurons Table -->
         <div class="flex-1 min-w-0">
-          <!-- Empty State -->
-          <div x-show="!neuronsLoading && neurons.length === 0" class="bg-white border border-gray-200 rounded-lg p-12 text-center">
-            <p class="text-sm text-gray-500">No neurons found</p>
-          </div>
-
-          <!-- Loading -->
-          <div x-show="neuronsLoading" class="bg-white border border-gray-200 rounded-lg p-12 text-center">
+          <div x-show="neuronsLoading" class="bg-white border rounded-lg p-12 text-center">
             <div class="inline-block w-5 h-5 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-            <p class="text-sm text-gray-500 mt-2">Loading neurons...</p>
           </div>
-
-          <!-- Table -->
-          <div x-show="!neuronsLoading && neurons.length > 0" class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-            <div class="overflow-x-auto">
-              <table class="w-full text-sm">
-                <thead>
-                  <tr class="border-b border-gray-200 bg-gray-50">
-                    <th class="text-left text-xs font-semibold text-gray-600 uppercase tracking-wide px-4 py-2.5">ID</th>
-                    <th class="text-left text-xs font-semibold text-gray-600 uppercase tracking-wide px-4 py-2.5">Type</th>
-                    <th class="text-left text-xs font-semibold text-gray-600 uppercase tracking-wide px-4 py-2.5">Tags</th>
-                    <th class="text-right text-xs font-semibold text-gray-600 uppercase tracking-wide px-4 py-2.5">Chunks</th>
-                    <th class="text-left text-xs font-semibold text-gray-600 uppercase tracking-wide px-4 py-2.5">Created</th>
+          <div x-show="!neuronsLoading && neurons.length > 0" class="bg-white border rounded-lg overflow-hidden">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b bg-gray-50">
+                  <th class="text-left text-xs font-semibold text-gray-600 px-4 py-2.5">ID</th>
+                  <th class="text-left text-xs font-semibold text-gray-600 px-4 py-2.5">Type</th>
+                  <th class="text-left text-xs font-semibold text-gray-600 px-4 py-2.5">Tags</th>
+                  <th class="text-right text-xs font-semibold text-gray-600 px-4 py-2.5">Chunks</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="neuron in neurons" :key="neuron.id">
+                  <tr @click="selectNeuron(neuron)" :class="selectedNeuron?.id === neuron.id ? 'bg-indigo-50' : 'hover:bg-gray-50'" class="border-b cursor-pointer">
+                    <td class="px-4 py-2.5 font-mono text-xs text-indigo-700" x-text="neuron.id.substring(0, 8) + '...'"></td>
+                    <td class="px-4 py-2.5 text-gray-700" x-text="neuron.sourceType || '--'"></td>
+                    <td class="px-4 py-2.5">
+                      <template x-for="tag in (neuron.tags || []).slice(0,3)" :key="tag">
+                        <span class="inline-block bg-indigo-50 text-indigo-700 text-xs px-1.5 py-0.5 rounded mr-1" x-text="tag"></span>
+                      </template>
+                    </td>
+                    <td class="px-4 py-2.5 text-right font-mono text-xs" x-text="neuron.chunks ?? '--'"></td>
                   </tr>
-                </thead>
-                <tbody>
-                  <template x-for="neuron in neurons" :key="neuron.id">
-                    <tr
-                      @click="selectNeuron(neuron)"
-                      :class="selectedNeuron?.id === neuron.id ? 'bg-indigo-50' : 'hover:bg-gray-50'"
-                      class="border-b border-gray-100 cursor-pointer transition-colors"
-                    >
-                      <td class="px-4 py-2.5 font-mono text-xs text-indigo-700" x-text="neuron.id.substring(0, 8) + '...'"></td>
-                      <td class="px-4 py-2.5 text-gray-700" x-text="neuron.sourceType || '--'"></td>
-                      <td class="px-4 py-2.5">
-                        <div class="flex flex-wrap gap-1">
-                          <template x-for="tag in (neuron.tags || [])" :key="tag">
-                            <span class="inline-block bg-indigo-50 text-indigo-700 text-xs font-medium px-1.5 py-0.5 rounded" x-text="tag"></span>
-                          </template>
-                          <span x-show="!neuron.tags || neuron.tags.length === 0" class="text-xs text-gray-400">--</span>
-                        </div>
-                      </td>
-                      <td class="px-4 py-2.5 text-right text-gray-700 font-mono text-xs" x-text="neuron.chunks ?? '--'"></td>
-                      <td class="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap" x-text="formatDate(neuron.createdAt)"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-
-            <!-- Pagination -->
-            <div class="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
+                </template>
+              </tbody>
+            </table>
+            <div class="flex items-center justify-between px-4 py-3 border-t bg-gray-50">
               <span class="text-xs text-gray-500" x-text="paginationLabel()"></span>
-              <div class="flex items-center gap-2">
-                <button
-                  @click="prevPage()"
-                  :disabled="neuronPage === 0"
-                  :class="neuronPage === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-200'"
-                  class="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded transition-colors"
-                >
-                  Prev
-                </button>
-                <button
-                  @click="nextPage()"
-                  :disabled="(neuronPage + 1) * neuronLimit >= neuronTotal"
-                  :class="(neuronPage + 1) * neuronLimit >= neuronTotal ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-200'"
-                  class="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded transition-colors"
-                >
-                  Next
-                </button>
+              <div class="flex gap-2">
+                <button @click="prevPage()" :disabled="neuronPage === 0" class="px-3 py-1.5 text-xs bg-white border rounded disabled:opacity-40">Prev</button>
+                <button @click="nextPage()" :disabled="(neuronPage + 1) * neuronLimit >= neuronTotal" class="px-3 py-1.5 text-xs bg-white border rounded disabled:opacity-40">Next</button>
               </div>
             </div>
           </div>
         </div>
-
-        <!-- Detail Panel -->
-        <div x-show="selectedNeuron" x-cloak x-transition class="w-96 flex-shrink-0">
-          <div class="bg-white border border-gray-200 rounded-lg overflow-hidden sticky top-4">
-            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
-              <h3 class="text-sm font-semibold text-gray-700">Neuron Detail</h3>
-              <button @click="selectedNeuron = null; selectedContent = ''" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+        <div x-show="selectedNeuron" x-cloak class="w-80 flex-shrink-0">
+          <div class="bg-white border rounded-lg overflow-hidden sticky top-4">
+            <div class="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
+              <h3 class="text-sm font-semibold">Detail</h3>
+              <button @click="selectedNeuron = null" class="text-gray-400 hover:text-gray-600">&times;</button>
             </div>
-            <div class="p-4 space-y-3 max-h-[calc(100vh-16rem)] overflow-y-auto">
-              <!-- ID -->
-              <div>
-                <label class="text-xs text-gray-500 block">ID</label>
-                <p class="text-xs font-mono text-gray-900 break-all select-all" x-text="selectedNeuron?.id"></p>
-              </div>
-              <!-- Merkle Root -->
-              <div>
-                <label class="text-xs text-gray-500 block">Merkle Root</label>
-                <p class="text-xs font-mono text-gray-900 break-all select-all" x-text="selectedNeuron?.merkleRoot || '--'"></p>
-              </div>
-              <!-- Source Type -->
-              <div>
-                <label class="text-xs text-gray-500 block">Source Type</label>
-                <p class="text-sm text-gray-900" x-text="selectedNeuron?.sourceType || '--'"></p>
-              </div>
-              <!-- Tags -->
-              <div>
-                <label class="text-xs text-gray-500 block mb-1">Tags</label>
-                <div class="flex flex-wrap gap-1">
-                  <template x-for="tag in (selectedNeuron?.tags || [])" :key="tag">
-                    <span class="inline-block bg-indigo-50 text-indigo-700 text-xs font-medium px-1.5 py-0.5 rounded" x-text="tag"></span>
-                  </template>
-                  <span x-show="!selectedNeuron?.tags || selectedNeuron?.tags.length === 0" class="text-xs text-gray-400">None</span>
-                </div>
-              </div>
-              <!-- Metadata Row -->
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="text-xs text-gray-500 block">Chunks</label>
-                  <p class="text-sm font-mono text-gray-900" x-text="selectedNeuron?.chunkHashes?.length ?? selectedNeuron?.chunks ?? '--'"></p>
-                </div>
-                <div>
-                  <label class="text-xs text-gray-500 block">Access Count</label>
-                  <p class="text-sm font-mono text-gray-900" x-text="selectedNeuron?.accessCount ?? '--'"></p>
-                </div>
-              </div>
-              <!-- Dates -->
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="text-xs text-gray-500 block">Created</label>
-                  <p class="text-xs text-gray-900" x-text="formatDate(selectedNeuron?.createdAt)"></p>
-                </div>
-                <div>
-                  <label class="text-xs text-gray-500 block">Updated</label>
-                  <p class="text-xs text-gray-900" x-text="formatDate(selectedNeuron?.updatedAt)"></p>
-                </div>
-              </div>
-              <div>
-                <label class="text-xs text-gray-500 block">Last Accessed</label>
-                <p class="text-xs text-gray-900" x-text="formatDate(selectedNeuron?.lastAccessed)"></p>
-              </div>
-              <!-- Synapses -->
-              <div x-show="selectedNeuron?.synapses">
-                <label class="text-xs text-gray-500 block mb-1">Synapses</label>
-                <div class="flex gap-4">
-                  <span class="text-xs text-gray-700">
-                    Outgoing: <span class="font-semibold font-mono" x-text="selectedNeuron?.synapses?.outgoing?.length ?? selectedNeuron?.synapses?.outgoing ?? 0"></span>
-                  </span>
-                  <span class="text-xs text-gray-700">
-                    Incoming: <span class="font-semibold font-mono" x-text="selectedNeuron?.synapses?.incoming?.length ?? selectedNeuron?.synapses?.incoming ?? 0"></span>
-                  </span>
-                </div>
-              </div>
-              <!-- Content -->
-              <div>
-                <label class="text-xs text-gray-500 block mb-1">Content</label>
-                <div x-show="contentLoading" class="text-xs text-gray-400">Loading content...</div>
-                <pre x-show="selectedContent && !contentLoading" class="bg-gray-50 border border-gray-200 rounded p-3 text-xs text-gray-800 font-mono whitespace-pre-wrap break-words max-h-64 overflow-y-auto" x-text="selectedContent"></pre>
-                <p x-show="!selectedContent && !contentLoading" class="text-xs text-gray-400">No content available</p>
-              </div>
-              <!-- Delete -->
-              <div class="pt-2 border-t border-gray-200">
-                <button
-                  x-show="!confirmDelete"
-                  @click="confirmDelete = true"
-                  class="w-full px-3 py-2 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded hover:bg-red-100 transition-colors"
-                >
-                  Delete Neuron
-                </button>
-                <div x-show="confirmDelete" class="space-y-2">
-                  <p class="text-xs text-red-600 font-medium">Are you sure? This cannot be undone.</p>
-                  <div class="flex gap-2">
-                    <button
-                      @click="deleteNeuron(selectedNeuron.id)"
-                      :disabled="deleting"
-                      class="flex-1 px-3 py-2 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700 transition-colors disabled:opacity-50"
-                    >
-                      <span x-show="!deleting">Confirm Delete</span>
-                      <span x-show="deleting">Deleting...</span>
-                    </button>
-                    <button
-                      @click="confirmDelete = false"
-                      class="flex-1 px-3 py-2 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
+            <div class="p-4 space-y-3 max-h-96 overflow-y-auto text-xs">
+              <div><label class="text-gray-500">ID</label><p class="font-mono break-all" x-text="selectedNeuron?.id"></p></div>
+              <div><label class="text-gray-500">Merkle Root</label><p class="font-mono break-all" x-text="selectedNeuron?.merkleRoot || '--'"></p></div>
+              <div><label class="text-gray-500">Content</label><pre class="bg-gray-50 border rounded p-2 max-h-40 overflow-y-auto whitespace-pre-wrap" x-text="selectedContent || 'Loading...'"></pre></div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ============================================================ -->
-    <!-- TAB 3: SEARCH -->
-    <!-- ============================================================ -->
-    <section x-show="activeTab === 'search'" x-cloak>
-      <h2 class="text-base font-semibold text-gray-900 mb-4">Semantic Search</h2>
+    <!-- TAB: GRAPH -->
+    <section x-show="activeTab === 'graph'" x-cloak>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">Knowledge Graph</h2>
+        <button @click="loadGraph()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50">Refresh</button>
+      </div>
+      <div class="grid grid-cols-3 gap-4 mb-4">
+        <div class="bg-white border rounded-lg p-4">
+          <p class="text-2xl font-bold text-indigo-600" x-text="graphData.stats?.nodeCount ?? 0"></p>
+          <p class="text-xs text-gray-500">Nodes</p>
+        </div>
+        <div class="bg-white border rounded-lg p-4">
+          <p class="text-2xl font-bold text-emerald-600" x-text="graphData.stats?.edgeCount ?? 0"></p>
+          <p class="text-xs text-gray-500">Edges</p>
+        </div>
+        <div class="bg-white border rounded-lg p-4">
+          <p class="text-2xl font-bold text-amber-600" x-text="graphData.nodes?.length > 0 ? (graphData.edges?.length / graphData.nodes?.length).toFixed(2) : 0"></p>
+          <p class="text-xs text-gray-500">Avg Connections</p>
+        </div>
+      </div>
+      <div class="bg-white border rounded-lg p-4">
+        <h3 class="text-sm font-semibold mb-3">Graph Edges</h3>
+        <div class="max-h-80 overflow-y-auto">
+          <table class="w-full text-xs">
+            <thead class="sticky top-0 bg-white">
+              <tr class="border-b"><th class="text-left px-2 py-1">Source</th><th class="text-left px-2 py-1">Target</th><th class="text-left px-2 py-1">Type</th><th class="text-right px-2 py-1">Weight</th></tr>
+            </thead>
+            <tbody>
+              <template x-for="(edge, i) in (graphData.edges || []).slice(0, 100)" :key="i">
+                <tr class="border-b border-gray-50">
+                  <td class="px-2 py-1 font-mono" x-text="edge.source?.substring(0, 8) + '...'"></td>
+                  <td class="px-2 py-1 font-mono" x-text="edge.target?.substring(0, 8) + '...'"></td>
+                  <td class="px-2 py-1" x-text="edge.type"></td>
+                  <td class="px-2 py-1 text-right" x-text="edge.weight?.toFixed(3)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
 
-      <!-- Search Form -->
-      <div class="bg-white border border-gray-200 rounded-lg p-5 mb-5">
-        <div class="flex flex-col sm:flex-row gap-3">
-          <div class="flex-1">
-            <label class="text-xs font-medium text-gray-600 block mb-1">Query</label>
-            <input
-              type="text"
-              x-model="searchQuery"
-              @keydown.enter="doSearch()"
-              placeholder="Enter search query..."
-              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-            >
-          </div>
-          <div class="w-24">
-            <label class="text-xs font-medium text-gray-600 block mb-1">Top-K</label>
-            <input
-              type="number"
-              x-model.number="searchK"
-              min="1"
-              max="100"
-              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-            >
-          </div>
-          <div class="flex items-end gap-3">
-            <label class="flex items-center gap-2 pb-2 cursor-pointer select-none">
-              <input type="checkbox" x-model="searchIncludeContent" class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-              <span class="text-xs font-medium text-gray-600 whitespace-nowrap">Include Content</span>
-            </label>
-            <button
-              @click="doSearch()"
-              :disabled="searching || !searchQuery.trim()"
-              class="px-5 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-            >
-              <span x-show="searching" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-              Search
+    <!-- TAB: INFERENCE -->
+    <section x-show="activeTab === 'inference'" x-cloak>
+      <h2 class="text-base font-semibold text-gray-900 mb-4">Inference Engine</h2>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="bg-white border rounded-lg p-5">
+          <h3 class="text-sm font-semibold mb-3">Run Inference</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="text-xs text-gray-600 block mb-1">Neuron ID</label>
+              <input type="text" x-model="inferNeuronId" placeholder="Enter neuron ID..." class="w-full px-3 py-2 text-sm border rounded focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs text-gray-600 block mb-1">Type</label>
+                <select x-model="inferType" class="w-full px-3 py-2 text-sm border rounded">
+                  <option value="forward">Forward</option>
+                  <option value="backward">Backward</option>
+                  <option value="causal">Causal</option>
+                  <option value="bidirectional">Bidirectional</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs text-gray-600 block mb-1">Depth</label>
+                <input type="number" x-model.number="inferDepth" min="1" max="10" class="w-full px-3 py-2 text-sm border rounded">
+              </div>
+            </div>
+            <button @click="runInference()" :disabled="inferring || !inferNeuronId" class="w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              <span x-show="inferring" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+              Run Inference
             </button>
           </div>
         </div>
-      </div>
-
-      <!-- Search Results -->
-      <div x-show="searchResults.length > 0" class="space-y-3">
-        <p class="text-xs text-gray-500 font-medium" x-text="searchResults.length + ' result(s) found'"></p>
-        <template x-for="(result, idx) in searchResults" :key="idx">
-          <div class="bg-white border border-gray-200 rounded-lg p-4">
-            <div class="flex items-start justify-between mb-2">
-              <div class="flex items-center gap-3">
-                <span class="font-mono text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded" x-text="result.neuronId?.substring(0, 12) + '...'"></span>
-                <span
-                  :class="result.score > 0.8 ? 'text-emerald-700 bg-emerald-50' : result.score > 0.5 ? 'text-amber-700 bg-amber-50' : 'text-gray-600 bg-gray-100'"
-                  class="text-xs font-semibold px-2 py-0.5 rounded"
-                  x-text="'Score: ' + (typeof result.score === 'number' ? result.score.toFixed(4) : result.score)"
-                ></span>
-              </div>
-              <span class="text-xs text-gray-500" x-text="result.sourceType || ''"></span>
+        <div class="bg-white border rounded-lg p-5">
+          <h3 class="text-sm font-semibold mb-3">Results</h3>
+          <div x-show="inferResults" class="space-y-2">
+            <div class="flex gap-4 text-xs">
+              <span class="text-gray-500">Type: <span class="font-semibold text-gray-900" x-text="inferResults?.type"></span></span>
+              <span class="text-gray-500">Found: <span class="font-semibold text-gray-900" x-text="inferResults?.totalFound"></span></span>
             </div>
-            <div class="flex flex-wrap gap-1 mb-2" x-show="result.tags && result.tags.length > 0">
-              <template x-for="tag in (result.tags || [])" :key="tag">
-                <span class="inline-block bg-indigo-50 text-indigo-700 text-xs font-medium px-1.5 py-0.5 rounded" x-text="tag"></span>
+            <div class="max-h-60 overflow-y-auto">
+              <template x-for="(r, i) in (inferResults?.results || []).slice(0, 20)" :key="i">
+                <div class="flex items-center justify-between py-1 border-b border-gray-100 text-xs">
+                  <span class="font-mono text-indigo-700" x-text="r.id?.substring(0, 12) + '...'"></span>
+                  <span class="text-gray-500">depth: <span x-text="r.distance"></span></span>
+                </div>
               </template>
             </div>
-            <div x-show="result.content" class="mt-2">
-              <pre class="bg-gray-50 border border-gray-200 rounded p-3 text-xs text-gray-800 font-mono whitespace-pre-wrap break-words max-h-48 overflow-y-auto" x-text="result.content"></pre>
-            </div>
           </div>
-        </template>
-      </div>
-
-      <!-- No Results -->
-      <div x-show="searchPerformed && searchResults.length === 0 && !searching" class="bg-white border border-gray-200 rounded-lg p-12 text-center">
-        <p class="text-sm text-gray-500">No results found</p>
-        <p class="text-xs text-gray-400 mt-1">Try a different query or adjust the Top-K value</p>
-      </div>
-
-      <!-- Search Error -->
-      <div x-show="searchError" x-cloak class="bg-red-50 border border-red-200 rounded-lg p-4">
-        <p class="text-sm text-red-700 font-medium">Search Error</p>
-        <p class="text-xs text-red-600 mt-1" x-text="searchError"></p>
+          <p x-show="!inferResults" class="text-sm text-gray-400 text-center py-8">Run inference to see results</p>
+        </div>
       </div>
     </section>
 
-    <!-- ============================================================ -->
-    <!-- TAB 4: INGEST -->
-    <!-- ============================================================ -->
+    <!-- TAB: ATTRACTORS -->
+    <section x-show="activeTab === 'attractors'" x-cloak>
+      <h2 class="text-base font-semibold text-gray-900 mb-4">Attractor Model</h2>
+      <div class="bg-white border rounded-lg p-5">
+        <div class="text-center py-8">
+          <p class="text-gray-500 mb-2">Attractors are managed via CLI</p>
+          <div class="bg-gray-100 rounded p-3 font-mono text-xs text-left inline-block">
+            <p class="text-gray-600"># Create attractor</p>
+            <p class="text-indigo-700">nmt attractor create "Goal Name" --strength 0.8</p>
+            <p class="text-gray-600 mt-2"># List attractors</p>
+            <p class="text-indigo-700">nmt attractor list</p>
+            <p class="text-gray-600 mt-2"># Find path to goal</p>
+            <p class="text-indigo-700">nmt attractor path &lt;neuron-id&gt; &lt;attractor-id&gt;</p>
+            <p class="text-gray-600 mt-2"># Calculate influence</p>
+            <p class="text-indigo-700">nmt attractor influence &lt;neuron-id&gt;</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: LEARNING -->
+    <section x-show="activeTab === 'learning'" x-cloak>
+      <h2 class="text-base font-semibold text-gray-900 mb-4">Four-Stage Learning</h2>
+      <div class="grid grid-cols-4 gap-4 mb-6">
+        <div class="bg-white border rounded-lg p-4 text-center">
+          <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-2">
+            <span class="text-blue-600 font-bold">1</span>
+          </div>
+          <p class="text-sm font-semibold">Extract</p>
+          <p class="text-xs text-gray-500">Identify info</p>
+        </div>
+        <div class="bg-white border rounded-lg p-4 text-center">
+          <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-2">
+            <span class="text-green-600 font-bold">2</span>
+          </div>
+          <p class="text-sm font-semibold">Pattern</p>
+          <p class="text-xs text-gray-500">Recognize patterns</p>
+        </div>
+        <div class="bg-white border rounded-lg p-4 text-center">
+          <div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-2">
+            <span class="text-amber-600 font-bold">3</span>
+          </div>
+          <p class="text-sm font-semibold">Process</p>
+          <p class="text-xs text-gray-500">Learn reasoning</p>
+        </div>
+        <div class="bg-white border rounded-lg p-4 text-center">
+          <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-2">
+            <span class="text-purple-600 font-bold">4</span>
+          </div>
+          <p class="text-sm font-semibold">Outcome</p>
+          <p class="text-xs text-gray-500">Apply feedback</p>
+        </div>
+      </div>
+      <div class="bg-white border rounded-lg p-5">
+        <h3 class="text-sm font-semibold mb-3">CLI Commands</h3>
+        <div class="bg-gray-100 rounded p-3 font-mono text-xs">
+          <p class="text-gray-600"># Start learning session</p>
+          <p class="text-indigo-700">nmt learn session start</p>
+          <p class="text-gray-600 mt-2"># Extract from neuron</p>
+          <p class="text-indigo-700">nmt learn extract &lt;neuron-id&gt; --limit 20</p>
+          <p class="text-gray-600 mt-2"># Full learning pipeline</p>
+          <p class="text-indigo-700">nmt orchestrate learn --input "Q" --output "A" --success</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: SYNC -->
+    <section x-show="activeTab === 'sync'" x-cloak>
+      <h2 class="text-base font-semibold text-gray-900 mb-4">State Synchronization</h2>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div>
+          <button @click="loadSyncStatus()" class="mb-3 text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded hover:bg-indigo-50">Refresh Status</button>
+          <div class="bg-white border rounded-lg p-5">
+            <h3 class="text-sm font-semibold mb-3">Current State</h3>
+            <div class="space-y-2 text-xs">
+              <div class="flex justify-between"><span class="text-gray-500">Node ID</span><span class="font-mono" x-text="syncStatus?.nodeId ?? '--'"></span></div>
+              <div class="flex justify-between"><span class="text-gray-500">Sequence</span><span class="font-mono" x-text="syncStatus?.sequence ?? 0"></span></div>
+              <div class="flex justify-between"><span class="text-gray-500">Neurons</span><span class="font-mono" x-text="syncStatus?.neuronCount ?? 0"></span></div>
+              <div class="flex justify-between"><span class="text-gray-500">Peers</span><span class="font-mono" x-text="syncStatus?.peers?.length ?? 0"></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="bg-white border rounded-lg p-5">
+          <h3 class="text-sm font-semibold mb-3">CLI Commands</h3>
+          <div class="bg-gray-100 rounded p-3 font-mono text-xs">
+            <p class="text-gray-600"># Check sync status</p>
+            <p class="text-indigo-700">nmt sync status</p>
+            <p class="text-gray-600 mt-2"># View change log</p>
+            <p class="text-indigo-700">nmt sync changes --from 0</p>
+            <p class="text-gray-600 mt-2"># Export state</p>
+            <p class="text-indigo-700">nmt sync export --output backup.json</p>
+            <p class="text-gray-600 mt-2"># Import state</p>
+            <p class="text-indigo-700">nmt sync import backup.json</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: SEARCH -->
+    <section x-show="activeTab === 'search'" x-cloak>
+      <h2 class="text-base font-semibold text-gray-900 mb-4">Semantic Search</h2>
+      <div class="bg-white border rounded-lg p-5 mb-5">
+        <div class="flex gap-3">
+          <input type="text" x-model="searchQuery" @keydown.enter="doSearch()" placeholder="Enter search query..." class="flex-1 px-3 py-2 text-sm border rounded focus:ring-2 focus:ring-indigo-500 outline-none">
+          <input type="number" x-model.number="searchK" min="1" max="100" class="w-20 px-3 py-2 text-sm border rounded" placeholder="K">
+          <label class="flex items-center gap-2 text-xs"><input type="checkbox" x-model="searchIncludeContent" class="rounded"> Content</label>
+          <button @click="doSearch()" :disabled="searching || !searchQuery" class="px-5 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50">Search</button>
+        </div>
+      </div>
+      <div x-show="searchResults.length > 0" class="space-y-3">
+        <template x-for="(r, i) in searchResults" :key="i">
+          <div class="bg-white border rounded-lg p-4">
+            <div class="flex items-center gap-3 mb-2">
+              <span class="font-mono text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded" x-text="r.neuronId?.substring(0, 12) + '...'"></span>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded" :class="r.score > 0.8 ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50'" x-text="'Score: ' + r.score?.toFixed(4)"></span>
+            </div>
+            <pre x-show="r.content" class="bg-gray-50 border rounded p-3 text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto" x-text="r.content"></pre>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- TAB: INGEST -->
     <section x-show="activeTab === 'ingest'" x-cloak>
       <h2 class="text-base font-semibold text-gray-900 mb-4">Ingest Content</h2>
-
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <!-- Ingest Form -->
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
+        <div class="bg-white border rounded-lg p-5">
           <div class="space-y-4">
             <div>
-              <div class="flex items-center justify-between mb-1">
-                <label class="text-xs font-medium text-gray-600">Text Content</label>
-                <span class="text-xs text-gray-400" x-text="ingestText.length + ' characters'"></span>
-              </div>
-              <textarea
-                x-model="ingestText"
-                rows="10"
-                placeholder="Enter or paste text content to ingest..."
-                class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-y font-mono"
-              ></textarea>
+              <label class="text-xs font-medium text-gray-600 block mb-1">Text Content</label>
+              <textarea x-model="ingestText" rows="8" placeholder="Enter text to ingest..." class="w-full px-3 py-2 text-sm border rounded font-mono resize-y"></textarea>
             </div>
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="text-xs font-medium text-gray-600 block mb-1">Source Type</label>
-                <input
-                  type="text"
-                  x-model="ingestSourceType"
-                  placeholder="dashboard"
-                  class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-                >
+                <input type="text" x-model="ingestSourceType" placeholder="dashboard" class="w-full px-3 py-2 text-sm border rounded">
               </div>
               <div>
-                <label class="text-xs font-medium text-gray-600 block mb-1">Tags (comma-separated)</label>
-                <input
-                  type="text"
-                  x-model="ingestTags"
-                  placeholder="tag1, tag2"
-                  class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-                >
+                <label class="text-xs font-medium text-gray-600 block mb-1">Tags</label>
+                <input type="text" x-model="ingestTags" placeholder="tag1, tag2" class="w-full px-3 py-2 text-sm border rounded">
               </div>
             </div>
-            <button
-              @click="doIngest()"
-              :disabled="ingesting || !ingestText.trim()"
-              class="w-full px-4 py-2.5 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-            >
-              <span x-show="ingesting" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+            <button @click="doIngest()" :disabled="ingesting || !ingestText" class="w-full px-4 py-2.5 text-sm font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:opacity-50">
               <span x-text="ingesting ? 'Ingesting...' : 'Ingest'"></span>
             </button>
           </div>
         </div>
-
-        <!-- Result Panel -->
         <div>
-          <!-- Success -->
-          <div x-show="ingestResult" x-cloak class="bg-emerald-50 border border-emerald-200 rounded-lg p-5">
-            <h3 class="text-sm font-semibold text-emerald-800 mb-3">Ingestion Successful</h3>
-            <div class="space-y-2">
-              <div>
-                <label class="text-xs text-emerald-600">Neuron ID</label>
-                <p class="text-xs font-mono text-emerald-900 break-all select-all" x-text="ingestResult?.neuronId"></p>
-              </div>
-              <div>
-                <label class="text-xs text-emerald-600">Merkle Root</label>
-                <p class="text-xs font-mono text-emerald-900 break-all select-all" x-text="ingestResult?.merkleRoot"></p>
-              </div>
-              <div class="flex gap-4">
-                <div>
-                  <label class="text-xs text-emerald-600">Chunks</label>
-                  <p class="text-sm font-semibold text-emerald-900" x-text="ingestResult?.chunks"></p>
-                </div>
-                <div>
-                  <label class="text-xs text-emerald-600">Source Type</label>
-                  <p class="text-sm text-emerald-900" x-text="ingestResult?.sourceType"></p>
-                </div>
-              </div>
-              <div x-show="ingestResult?.tags?.length > 0">
-                <label class="text-xs text-emerald-600 block mb-1">Tags</label>
-                <div class="flex flex-wrap gap-1">
-                  <template x-for="tag in (ingestResult?.tags || [])" :key="tag">
-                    <span class="inline-block bg-emerald-100 text-emerald-800 text-xs font-medium px-1.5 py-0.5 rounded" x-text="tag"></span>
-                  </template>
-                </div>
-              </div>
-            </div>
+          <div x-show="ingestResult" class="bg-emerald-50 border border-emerald-200 rounded-lg p-5">
+            <h3 class="text-sm font-semibold text-emerald-800 mb-2">Success</h3>
+            <p class="text-xs font-mono break-all" x-text="'ID: ' + ingestResult?.neuronId"></p>
+            <p class="text-xs mt-1" x-text="'Chunks: ' + ingestResult?.chunks"></p>
           </div>
-
-          <!-- Error -->
-          <div x-show="ingestError" x-cloak class="bg-red-50 border border-red-200 rounded-lg p-5">
-            <h3 class="text-sm font-semibold text-red-800 mb-1">Ingestion Failed</h3>
-            <p class="text-xs text-red-600" x-text="ingestError"></p>
-          </div>
-
-          <!-- Empty State -->
-          <div x-show="!ingestResult && !ingestError" class="bg-white border border-gray-200 rounded-lg p-12 text-center">
-            <p class="text-sm text-gray-400">Results will appear here after ingestion</p>
+          <div x-show="ingestError" class="bg-red-50 border border-red-200 rounded-lg p-5">
+            <p class="text-sm text-red-700" x-text="ingestError"></p>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ============================================================ -->
-    <!-- TAB 5: VERIFY -->
-    <!-- ============================================================ -->
+    <!-- TAB: VERIFY -->
     <section x-show="activeTab === 'verify'" x-cloak>
-      <h2 class="text-base font-semibold text-gray-900 mb-4">Data Integrity Verification</h2>
-
+      <h2 class="text-base font-semibold text-gray-900 mb-4">Data Integrity</h2>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-
-        <!-- Verify All -->
         <div class="space-y-4">
-          <div class="bg-white border border-gray-200 rounded-lg p-5">
-            <h3 class="text-sm font-semibold text-gray-700 mb-3">Verify All Neurons</h3>
-            <button
-              @click="doVerifyAll()"
-              :disabled="verifying"
-              class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-            >
-              <span x-show="verifying" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+          <div class="bg-white border rounded-lg p-5">
+            <h3 class="text-sm font-semibold mb-3">Verify All Neurons</h3>
+            <button @click="doVerifyAll()" :disabled="verifying" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50">
               <span x-text="verifying ? 'Verifying...' : 'Run Verification'"></span>
             </button>
           </div>
-
-          <!-- Verify All Results -->
-          <div x-show="verifyAllResult" x-cloak class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-            <!-- Summary -->
-            <div class="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center gap-4">
-              <span class="text-xs font-medium text-gray-600">
-                Total: <span class="font-semibold text-gray-900" x-text="verifyAllResult?.total"></span>
-              </span>
-              <span class="text-xs font-medium text-emerald-600">
-                Valid: <span class="font-semibold" x-text="verifyAllResult?.valid"></span>
-              </span>
-              <span class="text-xs font-medium text-red-600">
-                Invalid: <span class="font-semibold" x-text="verifyAllResult?.invalid"></span>
-              </span>
-            </div>
-            <!-- Results Table -->
-            <div class="max-h-80 overflow-y-auto">
-              <table class="w-full text-sm">
-                <thead class="sticky top-0 bg-white">
-                  <tr class="border-b border-gray-100">
-                    <th class="text-left text-xs font-semibold text-gray-600 px-4 py-2">Neuron ID</th>
-                    <th class="text-center text-xs font-semibold text-gray-600 px-4 py-2">Status</th>
-                    <th class="text-left text-xs font-semibold text-gray-600 px-4 py-2">Errors</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <template x-for="(r, idx) in (verifyAllResult?.results || [])" :key="idx">
-                    <tr class="border-b border-gray-50">
-                      <td class="px-4 py-2 font-mono text-xs text-gray-700" x-text="r.neuronId?.substring(0, 12) + '...'"></td>
-                      <td class="px-4 py-2 text-center">
-                        <span x-show="r.valid" class="inline-block w-5 h-5 text-xs leading-5 text-center text-emerald-700 bg-emerald-100 rounded-full font-bold">OK</span>
-                        <span x-show="!r.valid" class="inline-block w-5 h-5 text-xs leading-5 text-center text-red-700 bg-red-100 rounded-full font-bold">!</span>
-                      </td>
-                      <td class="px-4 py-2 text-xs text-red-600" x-text="r.errors?.join(', ') || '--'"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-            <div x-show="!verifyAllResult?.results || verifyAllResult.results.length === 0" class="p-6 text-center">
-              <p class="text-xs text-gray-400">No verification results</p>
+          <div x-show="verifyAllResult" class="bg-white border rounded-lg p-5">
+            <div class="flex gap-4 text-xs mb-3">
+              <span>Total: <span class="font-bold" x-text="verifyAllResult?.total"></span></span>
+              <span class="text-emerald-600">Valid: <span class="font-bold" x-text="verifyAllResult?.valid"></span></span>
+              <span class="text-red-600">Invalid: <span class="font-bold" x-text="verifyAllResult?.invalid"></span></span>
             </div>
           </div>
         </div>
-
-        <!-- Verify Single -->
         <div class="space-y-4">
-          <div class="bg-white border border-gray-200 rounded-lg p-5">
-            <h3 class="text-sm font-semibold text-gray-700 mb-3">Verify Single Neuron</h3>
+          <div class="bg-white border rounded-lg p-5">
+            <h3 class="text-sm font-semibold mb-3">Verify Single</h3>
             <div class="flex gap-2">
-              <input
-                type="text"
-                x-model="verifyNeuronId"
-                placeholder="Enter neuron ID..."
-                @keydown.enter="doVerifySingle()"
-                class="flex-1 px-3 py-2 text-sm font-mono border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-              >
-              <button
-                @click="doVerifySingle()"
-                :disabled="verifySingleLoading || !verifyNeuronId.trim()"
-                class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-              >
-                <span x-show="verifySingleLoading" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                Verify
-              </button>
+              <input type="text" x-model="verifyNeuronId" placeholder="Neuron ID..." class="flex-1 px-3 py-2 text-sm border rounded font-mono">
+              <button @click="doVerifySingle()" :disabled="verifySingleLoading" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50">Verify</button>
             </div>
           </div>
-
-          <!-- Single Verify Result -->
-          <div x-show="verifySingleResult" x-cloak>
-            <div
-              :class="verifySingleResult?.valid ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'"
-              class="border rounded-lg p-5"
-            >
-              <div class="flex items-center gap-2 mb-3">
-                <span
-                  :class="verifySingleResult?.valid ? 'text-emerald-800 bg-emerald-200' : 'text-red-800 bg-red-200'"
-                  class="text-xs font-bold px-2 py-0.5 rounded"
-                  x-text="verifySingleResult?.valid ? 'VALID' : 'INVALID'"
-                ></span>
-              </div>
-              <div class="space-y-2">
-                <div>
-                  <label class="text-xs" :class="verifySingleResult?.valid ? 'text-emerald-600' : 'text-red-600'">Neuron ID</label>
-                  <p class="text-xs font-mono break-all" :class="verifySingleResult?.valid ? 'text-emerald-900' : 'text-red-900'" x-text="verifySingleResult?.neuronId"></p>
-                </div>
-                <div>
-                  <label class="text-xs" :class="verifySingleResult?.valid ? 'text-emerald-600' : 'text-red-600'">Merkle Root</label>
-                  <p class="text-xs font-mono break-all" :class="verifySingleResult?.valid ? 'text-emerald-900' : 'text-red-900'" x-text="verifySingleResult?.merkleRoot || '--'"></p>
-                </div>
-                <div x-show="verifySingleResult?.details" class="grid grid-cols-2 gap-2 pt-2 border-t" :class="verifySingleResult?.valid ? 'border-emerald-200' : 'border-red-200'">
-                  <div>
-                    <label class="text-xs" :class="verifySingleResult?.valid ? 'text-emerald-600' : 'text-red-600'">Chunks Verified</label>
-                    <p class="text-sm font-semibold" :class="verifySingleResult?.valid ? 'text-emerald-900' : 'text-red-900'" x-text="verifySingleResult?.details?.chunksVerified ?? '--'"></p>
-                  </div>
-                  <div>
-                    <label class="text-xs" :class="verifySingleResult?.valid ? 'text-emerald-600' : 'text-red-600'">Chunks Failed</label>
-                    <p class="text-sm font-semibold" :class="verifySingleResult?.valid ? 'text-emerald-900' : 'text-red-900'" x-text="verifySingleResult?.details?.chunksFailed ?? '--'"></p>
-                  </div>
-                  <div>
-                    <label class="text-xs" :class="verifySingleResult?.valid ? 'text-emerald-600' : 'text-red-600'">Merkle Valid</label>
-                    <p class="text-sm font-semibold" :class="verifySingleResult?.valid ? 'text-emerald-900' : 'text-red-900'" x-text="verifySingleResult?.details?.merkleValid ? 'Yes' : 'No'"></p>
-                  </div>
-                  <div>
-                    <label class="text-xs" :class="verifySingleResult?.valid ? 'text-emerald-600' : 'text-red-600'">Embedding Valid</label>
-                    <p class="text-sm font-semibold" :class="verifySingleResult?.valid ? 'text-emerald-900' : 'text-red-900'" x-text="verifySingleResult?.details?.embeddingValid ? 'Yes' : 'No'"></p>
-                  </div>
-                </div>
-                <div x-show="verifySingleResult?.errors?.length > 0" class="pt-2">
-                  <label class="text-xs text-red-600">Errors</label>
-                  <template x-for="(err, i) in (verifySingleResult?.errors || [])" :key="i">
-                    <p class="text-xs text-red-800 font-mono" x-text="err"></p>
-                  </template>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Verify Error -->
-          <div x-show="verifySingleError" x-cloak class="bg-red-50 border border-red-200 rounded-lg p-4">
-            <p class="text-sm text-red-700 font-medium">Verification Error</p>
-            <p class="text-xs text-red-600 mt-1" x-text="verifySingleError"></p>
-          </div>
-
-          <!-- Empty State -->
-          <div x-show="!verifySingleResult && !verifySingleError" class="bg-white border border-gray-200 rounded-lg p-12 text-center">
-            <p class="text-sm text-gray-400">Enter a neuron ID to verify its integrity</p>
+          <div x-show="verifySingleResult" :class="verifySingleResult?.valid ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'" class="border rounded-lg p-5">
+            <span class="text-xs font-bold px-2 py-0.5 rounded" :class="verifySingleResult?.valid ? 'text-emerald-800 bg-emerald-200' : 'text-red-800 bg-red-200'" x-text="verifySingleResult?.valid ? 'VALID' : 'INVALID'"></span>
           </div>
         </div>
       </div>
@@ -684,319 +469,119 @@
   <script>
     function dashboard() {
       return {
-        // Navigation
         activeTab: 'overview',
         tabs: [
           { id: 'overview', label: 'Overview' },
           { id: 'neurons', label: 'Neurons' },
+          { id: 'graph', label: 'Graph' },
+          { id: 'inference', label: 'Inference' },
+          { id: 'attractors', label: 'Attractors' },
+          { id: 'learning', label: 'Learning' },
+          { id: 'sync', label: 'Sync' },
           { id: 'search', label: 'Search' },
           { id: 'ingest', label: 'Ingest' },
           { id: 'verify', label: 'Verify' },
         ],
+        connected: false, lastRefresh: '', stats: {},
+        neurons: [], neuronTotal: 0, neuronPage: 0, neuronLimit: 50, neuronsLoading: false,
+        selectedNeuron: null, selectedContent: '',
+        graphData: { nodes: [], edges: [], stats: {} },
+        inferNeuronId: '', inferType: 'forward', inferDepth: 3, inferring: false, inferResults: null,
+        syncStatus: null,
+        searchQuery: '', searchK: 10, searchIncludeContent: true, searchResults: [], searching: false,
+        ingestText: '', ingestSourceType: 'dashboard', ingestTags: '', ingesting: false, ingestResult: null, ingestError: null,
+        verifying: false, verifyAllResult: null, verifyNeuronId: '', verifySingleResult: null, verifySingleLoading: false,
 
-        // Connection
-        connected: false,
-        lastRefresh: '',
-
-        // Stats
-        stats: {},
-
-        // Neurons
-        neurons: [],
-        neuronTotal: 0,
-        neuronPage: 0,
-        neuronLimit: 50,
-        neuronsLoading: false,
-        selectedNeuron: null,
-        selectedContent: '',
-        contentLoading: false,
-        confirmDelete: false,
-        deleting: false,
-
-        // Search
-        searchQuery: '',
-        searchK: 10,
-        searchIncludeContent: true,
-        searchResults: [],
-        searching: false,
-        searchPerformed: false,
-        searchError: null,
-
-        // Ingest
-        ingestText: '',
-        ingestSourceType: 'dashboard',
-        ingestTags: '',
-        ingesting: false,
-        ingestResult: null,
-        ingestError: null,
-
-        // Verify
-        verifying: false,
-        verifyAllResult: null,
-        verifyNeuronId: '',
-        verifySingleResult: null,
-        verifySingleLoading: false,
-        verifySingleError: null,
-
-        // Auto-refresh interval
-        _refreshInterval: null,
-
-        // --------------------------------------------------------
-        // Initialization
-        // --------------------------------------------------------
         async init() {
           await this.checkHealth();
           await this.loadStats();
-          this._refreshInterval = setInterval(() => {
-            if (this.activeTab === 'overview') {
-              this.loadStats();
-            }
-          }, 30000);
+          setInterval(() => { if (this.activeTab === 'overview') this.loadStats(); }, 30000);
         },
 
-        // --------------------------------------------------------
-        // Tab Switching
-        // --------------------------------------------------------
-        switchTab(tabId) {
-          this.activeTab = tabId;
-          if (tabId === 'overview') {
-            this.loadStats();
-          } else if (tabId === 'neurons') {
-            this.loadNeurons();
-          }
+        switchTab(id) {
+          this.activeTab = id;
+          if (id === 'overview') this.loadStats();
+          else if (id === 'neurons') this.loadNeurons();
+          else if (id === 'graph') this.loadGraph();
+          else if (id === 'sync') this.loadSyncStatus();
         },
 
-        // --------------------------------------------------------
-        // API Helper
-        // --------------------------------------------------------
         async api(method, path, body) {
-          const opts = {
-            method,
-            headers: { 'Content-Type': 'application/json' },
-          };
-          if (body) {
-            opts.body = JSON.stringify(body);
-          }
+          const opts = { method, headers: { 'Content-Type': 'application/json' } };
+          if (body) opts.body = JSON.stringify(body);
           try {
             const res = await fetch('/api/v1' + path, opts);
-            if (!res.ok) {
-              const errBody = await res.json().catch(() => ({}));
-              throw new Error(errBody.error || errBody.message || `HTTP ${res.status}`);
-            }
+            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
             this.connected = true;
             return await res.json();
           } catch (err) {
-            if (err.message === 'Failed to fetch' || err.message.includes('NetworkError')) {
-              this.connected = false;
-            }
+            if (err.message.includes('fetch')) this.connected = false;
             throw err;
           }
         },
 
-        // --------------------------------------------------------
-        // Health & Stats
-        // --------------------------------------------------------
-        async checkHealth() {
-          try {
-            await this.api('GET', '/health');
-            this.connected = true;
-          } catch {
-            this.connected = false;
-          }
-        },
+        async checkHealth() { try { await this.api('GET', '/health'); this.connected = true; } catch { this.connected = false; } },
+        async loadStats() { try { this.stats = await this.api('GET', '/stats'); this.lastRefresh = new Date().toLocaleTimeString(); } catch {} },
 
-        async loadStats() {
-          try {
-            this.stats = await this.api('GET', '/stats');
-            this.lastRefresh = new Date().toLocaleTimeString();
-          } catch {
-            // silent
-          }
-        },
-
-        // --------------------------------------------------------
-        // Neurons
-        // --------------------------------------------------------
         async loadNeurons() {
           this.neuronsLoading = true;
           try {
-            const offset = this.neuronPage * this.neuronLimit;
-            const data = await this.api('GET', `/neurons?limit=${this.neuronLimit}&offset=${offset}`);
-            this.neurons = data.neurons || [];
-            this.neuronTotal = data.total || 0;
-          } catch {
-            this.neurons = [];
-          } finally {
-            this.neuronsLoading = false;
-          }
+            const d = await this.api('GET', `/neurons?limit=${this.neuronLimit}&offset=${this.neuronPage * this.neuronLimit}`);
+            this.neurons = d.neurons || []; this.neuronTotal = d.total || 0;
+          } catch { this.neurons = []; }
+          this.neuronsLoading = false;
         },
 
-        async selectNeuron(neuron) {
-          this.confirmDelete = false;
-          this.selectedContent = '';
-          this.contentLoading = true;
-          try {
-            const detail = await this.api('GET', `/neurons/${neuron.id}`);
-            this.selectedNeuron = detail;
-          } catch {
-            this.selectedNeuron = neuron;
-          }
-          try {
-            const contentData = await this.api('GET', `/neurons/${neuron.id}/content`);
-            this.selectedContent = contentData.content || '';
-          } catch {
-            this.selectedContent = '';
-          } finally {
-            this.contentLoading = false;
-          }
+        async selectNeuron(n) {
+          this.selectedNeuron = n; this.selectedContent = 'Loading...';
+          try { const d = await this.api('GET', `/neurons/${n.id}/content`); this.selectedContent = d.content || ''; } catch { this.selectedContent = ''; }
         },
 
-        async deleteNeuron(id) {
-          this.deleting = true;
-          try {
-            await this.api('DELETE', `/neurons/${id}`);
-            this.selectedNeuron = null;
-            this.selectedContent = '';
-            this.confirmDelete = false;
-            await this.loadNeurons();
-          } catch (err) {
-            alert('Delete failed: ' + err.message);
-          } finally {
-            this.deleting = false;
-          }
+        prevPage() { if (this.neuronPage > 0) { this.neuronPage--; this.loadNeurons(); } },
+        nextPage() { if ((this.neuronPage + 1) * this.neuronLimit < this.neuronTotal) { this.neuronPage++; this.loadNeurons(); } },
+        paginationLabel() { return `${this.neuronPage * this.neuronLimit + 1}-${Math.min((this.neuronPage + 1) * this.neuronLimit, this.neuronTotal)} of ${this.neuronTotal}`; },
+
+        async loadGraph() { try { this.graphData = await this.api('GET', '/graph'); } catch { this.graphData = { nodes: [], edges: [], stats: {} }; } },
+
+        async runInference() {
+          if (!this.inferNeuronId) return;
+          this.inferring = true; this.inferResults = null;
+          try { this.inferResults = await this.api('POST', `/inference/${this.inferType}`, { neuronId: this.inferNeuronId, depth: this.inferDepth }); } catch (e) { alert(e.message); }
+          this.inferring = false;
         },
 
-        prevPage() {
-          if (this.neuronPage > 0) {
-            this.neuronPage--;
-            this.loadNeurons();
-          }
-        },
+        async loadSyncStatus() { try { this.syncStatus = await this.api('GET', '/sync/status'); } catch {} },
 
-        nextPage() {
-          if ((this.neuronPage + 1) * this.neuronLimit < this.neuronTotal) {
-            this.neuronPage++;
-            this.loadNeurons();
-          }
-        },
-
-        paginationLabel() {
-          const start = this.neuronPage * this.neuronLimit + 1;
-          const end = Math.min((this.neuronPage + 1) * this.neuronLimit, this.neuronTotal);
-          return `Showing ${start}-${end} of ${this.neuronTotal}`;
-        },
-
-        // --------------------------------------------------------
-        // Search
-        // --------------------------------------------------------
         async doSearch() {
-          if (!this.searchQuery.trim()) return;
-          this.searching = true;
-          this.searchResults = [];
-          this.searchError = null;
-          this.searchPerformed = false;
-          try {
-            const data = await this.api('POST', '/search', {
-              query: this.searchQuery,
-              k: this.searchK,
-              includeContent: this.searchIncludeContent,
-            });
-            this.searchResults = data.results || [];
-            this.searchPerformed = true;
-          } catch (err) {
-            this.searchError = err.message;
-            this.searchPerformed = true;
-          } finally {
-            this.searching = false;
-          }
+          if (!this.searchQuery) return;
+          this.searching = true; this.searchResults = [];
+          try { const d = await this.api('POST', '/search', { query: this.searchQuery, k: this.searchK, includeContent: this.searchIncludeContent }); this.searchResults = d.results || []; } catch {}
+          this.searching = false;
         },
 
-        // --------------------------------------------------------
-        // Ingest
-        // --------------------------------------------------------
         async doIngest() {
-          if (!this.ingestText.trim()) return;
-          this.ingesting = true;
-          this.ingestResult = null;
-          this.ingestError = null;
+          if (!this.ingestText) return;
+          this.ingesting = true; this.ingestResult = null; this.ingestError = null;
           try {
-            const tags = this.ingestTags
-              .split(',')
-              .map(t => t.trim())
-              .filter(t => t.length > 0);
-            const data = await this.api('POST', '/ingest', {
-              text: this.ingestText,
-              sourceType: this.ingestSourceType || 'dashboard',
-              tags: tags.length > 0 ? tags : undefined,
-            });
-            this.ingestResult = data;
-            this.ingestText = '';
-            this.ingestTags = '';
-          } catch (err) {
-            this.ingestError = err.message;
-          } finally {
-            this.ingesting = false;
-          }
+            const tags = this.ingestTags.split(',').map(t => t.trim()).filter(t => t);
+            this.ingestResult = await this.api('POST', '/ingest', { text: this.ingestText, sourceType: this.ingestSourceType, tags });
+            this.ingestText = ''; this.ingestTags = '';
+          } catch (e) { this.ingestError = e.message; }
+          this.ingesting = false;
         },
 
-        // --------------------------------------------------------
-        // Verify
-        // --------------------------------------------------------
-        async doVerifyAll() {
-          this.verifying = true;
-          this.verifyAllResult = null;
-          try {
-            this.verifyAllResult = await this.api('GET', '/verify');
-          } catch (err) {
-            this.verifyAllResult = { total: 0, valid: 0, invalid: 0, results: [], error: err.message };
-          } finally {
-            this.verifying = false;
-          }
-        },
-
+        async doVerifyAll() { this.verifying = true; try { this.verifyAllResult = await this.api('GET', '/verify'); } catch {} this.verifying = false; },
         async doVerifySingle() {
-          if (!this.verifyNeuronId.trim()) return;
-          this.verifySingleLoading = true;
-          this.verifySingleResult = null;
-          this.verifySingleError = null;
-          try {
-            this.verifySingleResult = await this.api('GET', `/verify/${this.verifyNeuronId.trim()}`);
-          } catch (err) {
-            this.verifySingleError = err.message;
-          } finally {
-            this.verifySingleLoading = false;
-          }
+          if (!this.verifyNeuronId) return;
+          this.verifySingleLoading = true; this.verifySingleResult = null;
+          try { this.verifySingleResult = await this.api('GET', `/verify/${this.verifyNeuronId}`); } catch {}
+          this.verifySingleLoading = false;
         },
 
-        // --------------------------------------------------------
-        // Formatters
-        // --------------------------------------------------------
-        formatNumber(val) {
-          if (val === null || val === undefined || val === '--') return '--';
-          return Number(val).toLocaleString();
-        },
-
-        formatBytes(bytes) {
-          if (bytes === null || bytes === undefined) return '--';
-          if (bytes === 0) return '0 B';
-          const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-          const i = Math.floor(Math.log(bytes) / Math.log(1024));
-          const val = bytes / Math.pow(1024, i);
-          return val.toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
-        },
-
-        formatDate(dateStr) {
-          if (!dateStr) return '--';
-          try {
-            const d = new Date(dateStr);
-            return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          } catch {
-            return dateStr;
-          }
-        },
+        formatNumber(v) { return v == null || v === '--' ? '--' : Number(v).toLocaleString(); },
+        formatBytes(b) { if (b == null) return '--'; if (b === 0) return '0 B'; const u = ['B','KB','MB','GB']; const i = Math.floor(Math.log(b)/Math.log(1024)); return (b/Math.pow(1024,i)).toFixed(1) + ' ' + u[i]; },
       };
     }
   </script>
-
 </body>
 </html>

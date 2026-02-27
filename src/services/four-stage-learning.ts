@@ -351,7 +351,43 @@ export class FourStageLearningSystem extends EventEmitter {
       });
     }
 
+    // Memory cleanup: clear session-specific data to prevent memory leaks
+    // This is important for long-running processes
+    this.clearSessionData();
+
     return session;
+  }
+
+  /**
+   * Clear session data to free memory
+   * Call this after endSession() or when you need to reset state
+   */
+  clearSessionData(): void {
+    const previousSizes = {
+      extracts: this.extracts.size,
+      patterns: this.patterns.size,
+      processes: this.processes.size,
+      outcomes: this.outcomes.size
+    };
+
+    this.extracts.clear();
+    this.patterns.clear();
+    this.processes.clear();
+    this.outcomes.clear();
+
+    this.emit('memory:cleared', previousSizes);
+  }
+
+  /**
+   * Get current memory usage stats
+   */
+  getMemoryStats(): { extracts: number; patterns: number; processes: number; outcomes: number } {
+    return {
+      extracts: this.extracts.size,
+      patterns: this.patterns.size,
+      processes: this.processes.size,
+      outcomes: this.outcomes.size
+    };
   }
 
   // ==================== Stage 1: Extract Meaningful ====================
@@ -1013,33 +1049,112 @@ export class FourStageLearningSystem extends EventEmitter {
     return words.filter(w => !stopwords.has(w)).slice(0, 10);
   }
 
+  /**
+   * Cluster extracts using optimized K-means style algorithm
+   * Complexity: O(k * n * d) instead of O(n²)
+   * Where k = number of clusters, n = number of extracts, d = embedding dimension
+   */
   private clusterExtracts(
-    extracts: MeaningfulExtract[]
+    extracts: MeaningfulExtract[],
+    similarityThreshold: number = 0.7
   ): MeaningfulExtract[][] {
-    // Simple greedy clustering by similarity
-    const clusters: MeaningfulExtract[][] = [];
-    const assigned = new Set<UUID>();
+    if (extracts.length === 0) return [];
+    if (extracts.length === 1) return [[extracts[0]]];
 
-    for (const extract of extracts) {
-      if (assigned.has(extract.id)) continue;
+    // Phase 1: Initialize clusters with well-separated seeds
+    // Use farthest-first traversal to select initial centroids - O(k*n)
+    const k = Math.min(
+      Math.ceil(Math.sqrt(extracts.length)),  // sqrt(n) clusters
+      Math.ceil(extracts.length / 3)          // at least 3 items per cluster
+    );
 
-      const cluster: MeaningfulExtract[] = [extract];
-      assigned.add(extract.id);
+    const centroids: Embedding384[] = [];
+    const centroidIndices: number[] = [];
 
-      for (const other of extracts) {
-        if (assigned.has(other.id)) continue;
+    // First centroid: random (use first element)
+    centroids.push(extracts[0].embedding);
+    centroidIndices.push(0);
 
-        const similarity = cosineSimilarity(extract.embedding, other.embedding);
-        if (similarity > 0.7) {
-          cluster.push(other);
-          assigned.add(other.id);
+    // Remaining centroids: farthest from existing centroids
+    for (let i = 1; i < k; i++) {
+      let maxMinDist = -1;
+      let farthestIdx = 0;
+
+      for (let j = 0; j < extracts.length; j++) {
+        if (centroidIndices.includes(j)) continue;
+
+        // Find minimum distance to any existing centroid
+        let minDist = Infinity;
+        for (const centroid of centroids) {
+          const sim = cosineSimilarity(extracts[j].embedding, centroid);
+          const dist = 1 - sim;
+          if (dist < minDist) minDist = dist;
+        }
+
+        if (minDist > maxMinDist) {
+          maxMinDist = minDist;
+          farthestIdx = j;
         }
       }
 
-      clusters.push(cluster);
+      centroids.push(extracts[farthestIdx].embedding);
+      centroidIndices.push(farthestIdx);
     }
 
-    return clusters;
+    // Phase 2: Assign each extract to nearest centroid - O(k*n)
+    const clusters: MeaningfulExtract[][] = Array.from({ length: k }, () => []);
+    const assignments = new Map<UUID, number>();
+
+    for (const extract of extracts) {
+      let bestCluster = 0;
+      let bestSimilarity = -1;
+
+      for (let i = 0; i < centroids.length; i++) {
+        const sim = cosineSimilarity(extract.embedding, centroids[i]);
+        if (sim > bestSimilarity) {
+          bestSimilarity = sim;
+          bestCluster = i;
+        }
+      }
+
+      // Only assign if similarity meets threshold
+      if (bestSimilarity >= similarityThreshold) {
+        clusters[bestCluster].push(extract);
+        assignments.set(extract.id, bestCluster);
+      } else {
+        // Create new single-item cluster for outliers
+        clusters.push([extract]);
+      }
+    }
+
+    // Phase 3: Refine centroids and reassign (1 iteration) - O(k*n)
+    const refinedCentroids = clusters
+      .filter(c => c.length > 0)
+      .map(cluster => this.calculateCentroid(cluster.map(e => e.embedding)));
+
+    // Final assignment with refined centroids
+    const finalClusters: MeaningfulExtract[][] = Array.from(
+      { length: refinedCentroids.length },
+      () => []
+    );
+
+    for (const extract of extracts) {
+      let bestCluster = 0;
+      let bestSimilarity = -1;
+
+      for (let i = 0; i < refinedCentroids.length; i++) {
+        const sim = cosineSimilarity(extract.embedding, refinedCentroids[i]);
+        if (sim > bestSimilarity) {
+          bestSimilarity = sim;
+          bestCluster = i;
+        }
+      }
+
+      finalClusters[bestCluster].push(extract);
+    }
+
+    // Remove empty clusters
+    return finalClusters.filter(c => c.length > 0);
   }
 
   private findSimilarPattern(cluster: MeaningfulExtract[]): LearnedPattern | null {
