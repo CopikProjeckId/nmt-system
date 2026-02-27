@@ -924,6 +924,327 @@
         </div>
       </section>
 
+      <!-- DATABASE TAB -->
+      <section x-show="activeTab === 'database'" x-cloak>
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="text-2xl font-medium text-md-on-surface dark:text-md-on-surface-dark">Database Bridge</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Connect external databases to import/export NMT data</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
+                  :class="dbConnected ? 'bg-md-success/10 text-md-success dark:bg-md-success/20' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'">
+              <span class="w-2 h-2 rounded-full" :class="dbConnected ? 'bg-md-success' : 'bg-gray-400'"></span>
+              <span x-text="dbConnected ? 'Connected' : 'Disconnected'"></span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Connection Panel -->
+        <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden mb-6">
+          <div class="px-6 py-4 border-b border-md-outline dark:border-md-outline-dark">
+            <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark flex items-center gap-2">
+              <span class="material-icons-outlined text-md-primary">link</span>
+              Connection
+            </h3>
+          </div>
+          <div class="p-6">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Driver</label>
+                <select x-model="dbDriver" @change="dbPort = dbDriver === 'mongodb' ? 27017 : 3306"
+                        class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+                  <option value="mysql">MySQL</option>
+                  <option value="mariadb">MariaDB</option>
+                  <option value="mongodb">MongoDB</option>
+                </select>
+              </div>
+              <div x-show="dbDriver !== 'mongodb' || !dbUri">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Host</label>
+                <input type="text" x-model="dbHost" placeholder="localhost"
+                       class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+              </div>
+              <div x-show="dbDriver !== 'mongodb' || !dbUri">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Port</label>
+                <input type="number" x-model.number="dbPort"
+                       class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Database</label>
+                <input type="text" x-model="dbDatabase" placeholder="mydb"
+                       class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div x-show="dbDriver !== 'mongodb' || !dbUri">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">User</label>
+                <input type="text" x-model="dbUser" placeholder="root"
+                       class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+              </div>
+              <div x-show="dbDriver !== 'mongodb' || !dbUri">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Password</label>
+                <input type="password" x-model="dbPassword" placeholder="••••••"
+                       class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+              </div>
+              <div x-show="dbDriver === 'mongodb'" class="md:col-span-2">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">URI (optional, overrides host/port/user)</label>
+                <input type="text" x-model="dbUri" placeholder="mongodb://localhost:27017"
+                       class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm font-mono focus:ring-2 focus:ring-md-primary outline-none">
+              </div>
+            </div>
+
+            <!-- Error Message -->
+            <div x-show="dbError" class="mb-4 p-3 bg-md-error/10 border border-md-error/30 rounded-lg text-sm text-md-error flex items-center gap-2">
+              <span class="material-icons-outlined text-lg">error</span>
+              <span x-text="dbError"></span>
+              <button @click="dbError = ''" class="ml-auto material-icons-outlined text-lg hover:opacity-70">close</button>
+            </div>
+
+            <div class="flex gap-3">
+              <button @click="dbConnect()" :disabled="dbLoading || !dbDatabase"
+                      class="flex items-center gap-2 px-5 py-2.5 bg-md-primary text-white rounded-lg text-sm font-medium hover:bg-md-primary-dark disabled:opacity-50 shadow-md-1 transition-all">
+                <span x-show="dbLoading" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                <span class="material-icons-outlined text-lg" x-show="!dbLoading">power</span>
+                <span x-text="dbLoading ? 'Connecting...' : 'Connect & Scan'"></span>
+              </button>
+              <button x-show="dbConnected" @click="dbDisconnect()"
+                      class="flex items-center gap-2 px-5 py-2.5 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-all">
+                <span class="material-icons-outlined text-lg">power_off</span>
+                Disconnect
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Schema Browser -->
+        <div x-show="dbSchema" class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden mb-6">
+          <div class="px-6 py-4 border-b border-md-outline dark:border-md-outline-dark">
+            <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark flex items-center gap-2">
+              <span class="material-icons-outlined text-md-primary">table_chart</span>
+              Schema Browser
+              <span class="text-xs font-medium bg-md-primary/10 text-md-primary dark:bg-md-primary/20 dark:text-md-primary-light px-2 py-0.5 rounded-full" x-text="dbSchema?.name"></span>
+            </h3>
+          </div>
+          <div class="flex divide-x divide-md-outline dark:divide-md-outline-dark" style="min-height: 300px;">
+            <!-- Table List -->
+            <div class="w-64 flex-shrink-0 overflow-y-auto" style="max-height: 400px;">
+              <template x-for="table in (dbSchema?.tables || [])" :key="table.name">
+                <button @click="dbSelectTable(table.name)"
+                        :class="dbSelectedTable === table.name ? 'bg-md-primary/10 dark:bg-md-primary/20 border-l-2 border-md-primary' : 'hover:bg-md-surface-variant dark:hover:bg-md-surface-dark'"
+                        class="w-full text-left px-4 py-3 border-b border-md-outline dark:border-md-outline-dark transition-colors">
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="table.name"></span>
+                    <span class="text-xs bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-2 py-0.5 rounded-full" x-text="(table.rowCount ?? 0).toLocaleString() + ' rows'"></span>
+                  </div>
+                </button>
+              </template>
+              <div x-show="!dbSchema?.tables?.length" class="p-4 text-center text-gray-400 text-sm">
+                No tables found
+              </div>
+            </div>
+
+            <!-- Column Details -->
+            <div class="flex-1 overflow-x-auto">
+              <template x-if="dbSelectedTable && dbGetSelectedTableSchema()">
+                <table class="w-full">
+                  <thead>
+                    <tr class="bg-md-surface-variant dark:bg-md-surface-dark">
+                      <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Column</th>
+                      <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Type</th>
+                      <th class="text-left text-xs font-medium text-gray-500 uppercase tracking-wider px-4 py-3">Attributes</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-md-outline dark:divide-md-outline-dark">
+                    <template x-for="col in dbGetSelectedTableSchema().columns" :key="col.name">
+                      <tr class="hover:bg-md-surface-variant/50 dark:hover:bg-md-surface-dark/50">
+                        <td class="px-4 py-2.5">
+                          <span class="text-sm font-mono text-md-on-surface dark:text-md-on-surface-dark" x-text="col.name"></span>
+                        </td>
+                        <td class="px-4 py-2.5">
+                          <span class="text-sm text-gray-600 dark:text-gray-400" x-text="col.type"></span>
+                        </td>
+                        <td class="px-4 py-2.5">
+                          <div class="flex flex-wrap gap-1">
+                            <span x-show="col.isPrimary" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">PK</span>
+                            <span x-show="col.isForeign" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
+                              FK<span x-show="col.foreignTable" class="ml-0.5" x-text="'→ ' + col.foreignTable"></span>
+                            </span>
+                            <span x-show="!col.nullable" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">NN</span>
+                          </div>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </template>
+              <div x-show="!dbSelectedTable" class="flex items-center justify-center h-full text-gray-400 dark:text-gray-500">
+                <div class="text-center py-12">
+                  <span class="material-icons-outlined text-4xl mb-2 block">arrow_back</span>
+                  <p class="text-sm">Select a table to view columns</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Import / Export -->
+        <div x-show="dbConnected" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Import Panel -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+            <div class="px-6 py-4 border-b border-md-outline dark:border-md-outline-dark">
+              <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark flex items-center gap-2">
+                <span class="material-icons-outlined text-md-success">download</span>
+                Import (DB → NMT)
+              </h3>
+            </div>
+            <div class="p-6 space-y-4">
+              <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Table / Collection</label>
+                <select x-model="dbImportTable"
+                        class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+                  <option value="">Select table...</option>
+                  <template x-for="t in (dbSchema?.tables || [])" :key="t.name">
+                    <option :value="t.name" x-text="t.name + ' (' + (t.rowCount ?? 0) + ' rows)'"></option>
+                  </template>
+                </select>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Limit (rows)</label>
+                  <input type="number" x-model="dbImportLimit" placeholder="All"
+                         class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Batch Size</label>
+                  <input type="number" x-model="dbImportBatch" placeholder="1000"
+                         class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Tags (comma-separated)</label>
+                <input type="text" x-model="dbImportTags" placeholder="import, users"
+                       class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+              </div>
+              <button @click="dbRunImport()" :disabled="dbImportLoading || !dbImportTable"
+                      class="w-full py-3 bg-md-success text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2 shadow-md-1 transition-all">
+                <span x-show="dbImportLoading" class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                <span class="material-icons-outlined" x-show="!dbImportLoading">download</span>
+                <span x-text="dbImportLoading ? 'Importing...' : 'Import'"></span>
+              </button>
+
+              <!-- Import Result -->
+              <div x-show="dbImportResult" class="p-4 bg-md-success/10 dark:bg-md-success/20 border border-md-success/30 rounded-lg">
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="material-icons-outlined text-md-success">check_circle</span>
+                  <span class="text-sm font-medium text-md-success">Import Complete</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span class="text-gray-500 dark:text-gray-400">Rows Processed:</span>
+                    <span class="ml-1 font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="dbImportResult?.rowsProcessed"></span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 dark:text-gray-400">Neurons Created:</span>
+                    <span class="ml-1 font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="dbImportResult?.neuronsCreated"></span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 dark:text-gray-400">Synapses Created:</span>
+                    <span class="ml-1 font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="dbImportResult?.synapsesCreated"></span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 dark:text-gray-400">Duration:</span>
+                    <span class="ml-1 font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="((dbImportResult?.duration || 0) / 1000).toFixed(1) + 's'"></span>
+                  </div>
+                </div>
+                <div x-show="dbImportResult?.errors?.length > 0" class="mt-3 text-xs text-md-error">
+                  <span x-text="dbImportResult.errors.length + ' error(s)'"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Export Panel -->
+          <div class="card bg-md-surface dark:bg-md-surface-variant-dark rounded-xl shadow-md-1 overflow-hidden">
+            <div class="px-6 py-4 border-b border-md-outline dark:border-md-outline-dark">
+              <h3 class="text-lg font-medium text-md-on-surface dark:text-md-on-surface-dark flex items-center gap-2">
+                <span class="material-icons-outlined text-md-primary">upload</span>
+                Export (NMT → DB)
+              </h3>
+            </div>
+            <div class="p-6 space-y-4">
+              <div>
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Target Table Name</label>
+                <input type="text" x-model="dbExportTable" placeholder="nmt_neurons"
+                       class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Tags Filter</label>
+                  <input type="text" x-model="dbExportTags" placeholder="All neurons"
+                         class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Limit</label>
+                  <input type="number" x-model="dbExportLimit" placeholder="All"
+                         class="w-full px-3 py-2.5 bg-md-surface-variant dark:bg-md-surface-dark border border-md-outline dark:border-md-outline-dark rounded-lg text-sm focus:ring-2 focus:ring-md-primary outline-none">
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-x-6 gap-y-2">
+                <label class="flex items-center gap-2 text-sm text-md-on-surface dark:text-md-on-surface-dark cursor-pointer">
+                  <input type="checkbox" x-model="dbExportEmbeddings" class="w-4 h-4 text-md-primary rounded focus:ring-md-primary">
+                  Include Embeddings
+                </label>
+                <label class="flex items-center gap-2 text-sm text-md-on-surface dark:text-md-on-surface-dark cursor-pointer">
+                  <input type="checkbox" x-model="dbExportSynapses" class="w-4 h-4 text-md-primary rounded focus:ring-md-primary">
+                  Include Synapses
+                </label>
+                <label class="flex items-center gap-2 text-sm text-md-on-surface dark:text-md-on-surface-dark cursor-pointer" title="Export original source columns instead of neuron metadata">
+                  <input type="checkbox" x-model="dbExportRestore" class="w-4 h-4 text-md-tertiary rounded focus:ring-md-tertiary">
+                  Restore Source Data
+                </label>
+              </div>
+              <button @click="dbRunExport()" :disabled="dbExportLoading"
+                      class="w-full py-3 bg-md-primary text-white rounded-lg font-medium hover:bg-md-primary-dark disabled:opacity-50 flex items-center justify-center gap-2 shadow-md-1 transition-all">
+                <span x-show="dbExportLoading" class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                <span class="material-icons-outlined" x-show="!dbExportLoading">upload</span>
+                <span x-text="dbExportLoading ? 'Exporting...' : 'Export'"></span>
+              </button>
+
+              <!-- Export Result -->
+              <div x-show="dbExportResult" class="p-4 bg-md-primary/10 dark:bg-md-primary/20 border border-md-primary/30 rounded-lg">
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="material-icons-outlined text-md-primary">check_circle</span>
+                  <span class="text-sm font-medium text-md-primary">Export Complete</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span class="text-gray-500 dark:text-gray-400">Neurons Exported:</span>
+                    <span class="ml-1 font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="dbExportResult?.neuronsExported"></span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 dark:text-gray-400">Synapses Exported:</span>
+                    <span class="ml-1 font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="dbExportResult?.synapsesExported"></span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 dark:text-gray-400">Tables Created:</span>
+                    <span class="ml-1 font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="(dbExportResult?.tablesCreated || []).join(', ') || 'none'"></span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500 dark:text-gray-400">Duration:</span>
+                    <span class="ml-1 font-medium text-md-on-surface dark:text-md-on-surface-dark" x-text="((dbExportResult?.duration || 0) / 1000).toFixed(1) + 's'"></span>
+                  </div>
+                  <div x-show="dbExportResult?.sourceDataRestored > 0">
+                    <span class="text-gray-500 dark:text-gray-400">Source Restored:</span>
+                    <span class="ml-1 font-medium text-md-tertiary" x-text="dbExportResult?.sourceDataRestored"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
     </div>
   </main>
 
@@ -952,6 +1273,7 @@
           { id: 'search', label: 'Search', icon: 'search' },
           { id: 'ingest', label: 'Ingest', icon: 'upload_file' },
           { id: 'verify', label: 'Verify', icon: 'verified' },
+          { id: 'database', label: 'Database', icon: 'storage' },
         ],
 
         // Connection
@@ -1007,6 +1329,34 @@
         verifyNeuronId: '',
         verifySingleResult: null,
         verifySingleLoading: false,
+
+        // Database
+        dbDriver: 'mysql',
+        dbHost: 'localhost',
+        dbPort: 3306,
+        dbUser: '',
+        dbPassword: '',
+        dbDatabase: '',
+        dbUri: '',
+        dbConnected: false,
+        dbSchema: null,
+        dbSelectedTable: null,
+        dbImportTable: '',
+        dbImportLimit: '',
+        dbImportBatch: '1000',
+        dbImportTags: '',
+        dbImportResult: null,
+        dbImportLoading: false,
+        dbExportTable: 'nmt_neurons',
+        dbExportTags: '',
+        dbExportLimit: '',
+        dbExportEmbeddings: true,
+        dbExportSynapses: true,
+        dbExportRestore: false,
+        dbExportResult: null,
+        dbExportLoading: false,
+        dbLoading: false,
+        dbError: '',
 
         async init() {
           await this.checkHealth();
@@ -1305,6 +1655,114 @@
           this.verifySingleResult = null;
           try { this.verifySingleResult = await this.api('GET', `/verify/${this.verifyNeuronId}`); } catch {}
           this.verifySingleLoading = false;
+        },
+
+        // Database methods
+        dbGetConnection() {
+          const conn = {
+            driver: this.dbDriver,
+            host: this.dbHost,
+            port: this.dbPort,
+            user: this.dbUser || undefined,
+            password: this.dbPassword || undefined,
+            database: this.dbDatabase,
+          };
+          if (this.dbDriver === 'mongodb' && this.dbUri) {
+            conn.uri = this.dbUri;
+          }
+          return conn;
+        },
+
+        async dbConnect() {
+          this.dbLoading = true;
+          this.dbError = '';
+          this.dbSchema = null;
+          this.dbSelectedTable = null;
+          this.dbImportResult = null;
+          this.dbExportResult = null;
+          try {
+            const conn = this.dbGetConnection();
+            await this.api('POST', '/db/connect', conn);
+            // Connection test passed; now fetch schema
+            try {
+              const schema = await this.api('POST', '/db/schema', conn);
+              this.dbSchema = schema;
+              if (schema.tables?.length > 0) {
+                this.dbSelectedTable = schema.tables[0].name;
+                this.dbImportTable = schema.tables[0].name;
+              }
+            } catch (schemaErr) {
+              // Connection works but schema fetch failed - still mark as connected
+              this.dbError = 'Connected, but schema fetch failed: ' + (schemaErr.message || 'Unknown error');
+            }
+            this.dbConnected = true;
+          } catch (e) {
+            this.dbConnected = false;
+            this.dbError = e.message || 'Connection failed';
+          }
+          this.dbLoading = false;
+        },
+
+        dbDisconnect() {
+          this.dbConnected = false;
+          this.dbSchema = null;
+          this.dbSelectedTable = null;
+          this.dbImportResult = null;
+          this.dbExportResult = null;
+          this.dbError = '';
+        },
+
+        dbSelectTable(name) {
+          this.dbSelectedTable = name;
+        },
+
+        dbGetSelectedTableSchema() {
+          if (!this.dbSchema || !this.dbSelectedTable) return null;
+          return this.dbSchema.tables.find(t => t.name === this.dbSelectedTable) || null;
+        },
+
+        async dbRunImport() {
+          if (!this.dbImportTable) return;
+          this.dbImportLoading = true;
+          this.dbImportResult = null;
+          this.dbError = '';
+          try {
+            const tags = this.dbImportTags ? this.dbImportTags.split(',').map(t => t.trim()).filter(t => t) : [];
+            const parsedLimit = this.dbImportLimit ? parseInt(this.dbImportLimit, 10) : undefined;
+            const parsedBatch = this.dbImportBatch ? parseInt(this.dbImportBatch, 10) : 1000;
+            this.dbImportResult = await this.api('POST', '/db/import', {
+              connection: this.dbGetConnection(),
+              table: this.dbImportTable,
+              limit: Number.isNaN(parsedLimit) ? undefined : parsedLimit,
+              batchSize: Number.isNaN(parsedBatch) ? 1000 : parsedBatch,
+              tags,
+            });
+          } catch (e) {
+            this.dbError = e.message || 'Import failed';
+          }
+          this.dbImportLoading = false;
+        },
+
+        async dbRunExport() {
+          this.dbExportLoading = true;
+          this.dbExportResult = null;
+          this.dbError = '';
+          try {
+            const tags = this.dbExportTags ? this.dbExportTags.split(',').map(t => t.trim()).filter(t => t) : undefined;
+            const parsedExportLimit = this.dbExportLimit ? parseInt(this.dbExportLimit, 10) : undefined;
+            this.dbExportResult = await this.api('POST', '/db/export', {
+              connection: this.dbGetConnection(),
+              table: this.dbExportTable || 'nmt_neurons',
+              tags,
+              limit: Number.isNaN(parsedExportLimit) ? undefined : parsedExportLimit,
+              includeEmbeddings: this.dbExportEmbeddings,
+              includeSynapses: this.dbExportSynapses,
+              restoreSourceData: this.dbExportRestore,
+            });
+          } catch (e) {
+            this.dbError = e.message || 'Export failed';
+          }
+          this.dbExportLoading = false;
         },
 
         formatNumber(v) {

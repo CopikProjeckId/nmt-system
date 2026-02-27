@@ -44,6 +44,11 @@ Probabilistic Ontology (확률적 존재론):
 
   benchmark             Run performance benchmarks
 
+Database Bridge (외부 DB 연동):
+  db schema             Analyze external DB schema
+  db import             Import DB rows → NMT neurons
+  db export             Export NMT neurons → DB tables
+
 Options:
   -h, --help            Show this help message
   -v, --version         Show version number
@@ -1373,6 +1378,122 @@ async function cmdSyncDispatch(args: string[], config: Config) {
   }
 }
 
+async function cmdProbDispatch(args: string[], config: Config) {
+  if (args.length === 0) {
+    console.log('Usage: nmt prob <subcommand> [options]');
+    console.log('Subcommands: init, save, load, evolve, status, metrics, prometheus, health');
+    return;
+  }
+
+  const ctx = await bootstrap(config);
+
+  try {
+    const { cmdProb } = await import('../src/cli/probabilistic-commands.js');
+    const result = await cmdProb(args, config, {
+      neuronStore: ctx.neuronStore,
+      inferenceEngine: ctx.inferenceEngine,
+      attractorModel: ctx.attractorModel,
+      learningSystem: ctx.learningSystem,
+      neuronManager: ctx.neuronManager,
+      embeddingManager: ctx.embeddingManager,
+    });
+
+    if (config.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else if (result.success) {
+      console.log(result.data);
+    } else {
+      console.error(result.error);
+    }
+
+    await shutdown();
+  } catch (error: any) {
+    await shutdown();
+    console.error('Prob failed:', error.message);
+    process.exit(1);
+  }
+}
+
+async function cmdDbDispatch(args: string[], config: Config) {
+  const { parseDBArgs, formatSchema, formatImportResult, formatExportResult, DB_HELP } =
+    await import('../src/cli/commands/db.js');
+
+  const parsed = parseDBArgs(args);
+
+  if (parsed.subCommand === 'help' || !parsed.config.database) {
+    console.log(DB_HELP);
+    return;
+  }
+
+  const { createConnector } = await import('../src/connectors/index.js');
+
+  try {
+    const connector = await createConnector(parsed.config.driver);
+    await connector.connect(parsed.config);
+
+    switch (parsed.subCommand) {
+      case 'schema': {
+        const schema = await connector.getSchema();
+        console.log(formatSchema(schema));
+        break;
+      }
+
+      case 'import': {
+        if (!parsed.table) {
+          console.error('Error: --table is required for import.');
+          console.log('Usage: nmt db import --driver mysql -d mydb -t users');
+          break;
+        }
+
+        const ctx = await bootstrap(config);
+        const { DBBridgeService } = await import('../src/services/db-bridge.js');
+        const bridge = new DBBridgeService(connector, ctx.ingestionService, ctx.neuronStore);
+
+        console.log(`Importing from ${parsed.config.database}.${parsed.table}...`);
+        const result = await bridge.importTable({
+          table: parsed.table,
+          limit: parsed.limit,
+          batchSize: parsed.batchSize,
+          tags: parsed.tags,
+          autoConnect: true,
+        });
+
+        console.log(formatImportResult(result));
+        await shutdown();
+        break;
+      }
+
+      case 'export': {
+        const ctx = await bootstrap(config);
+        const { DBBridgeService } = await import('../src/services/db-bridge.js');
+        const bridge = new DBBridgeService(connector, ctx.ingestionService, ctx.neuronStore);
+
+        console.log(`Exporting to ${parsed.config.database}...`);
+        const result = await bridge.exportNeurons({
+          table: parsed.table,
+          tags: parsed.tags,
+          limit: parsed.limit,
+          includeEmbeddings: parsed.includeEmbeddings,
+          includeSynapses: parsed.includeSynapses,
+        });
+
+        console.log(formatExportResult(result));
+        await shutdown();
+        break;
+      }
+
+      default:
+        console.log(DB_HELP);
+    }
+
+    await connector.disconnect();
+  } catch (error: any) {
+    await shutdown();
+    console.error(`DB ${parsed.subCommand} failed:`, error.message);
+    process.exit(1);
+  }
+}
+
 // ============== Main Dispatcher ==============
 
 async function main() {
@@ -1443,6 +1564,14 @@ async function main() {
       break;
     case 'sync':
       await cmdSyncDispatch(args, config);
+      break;
+    case 'prob':
+      await cmdProbDispatch(args, config);
+      break;
+
+    // Database Bridge (외부 DB 연동)
+    case 'db':
+      await cmdDbDispatch(args, config);
       break;
 
     // MCP Server (Claude Code Integration)

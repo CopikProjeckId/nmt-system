@@ -66,6 +66,20 @@ interface SyncContext extends ProbabilisticContext {
       lastSequence: number;
       status: string;
     }>;
+    applyRemoteChanges: (changes: Array<{
+      sequence: number;
+      type: string;
+      operation: string;
+      entityId: string;
+      data: unknown;
+      vectorClock: Record<string, number>;
+      timestamp: string;
+      nodeId?: string;
+    }>) => Promise<{
+      applied: number;
+      conflicts: number;
+      resolved: string[];
+    }>;
   };
   changeJournal?: {
     getStats: () => Promise<{
@@ -373,17 +387,24 @@ async function syncImport(
       };
     }
 
-    // For now, just validate - actual import would need sync manager support
-    let output = 'Sync State Import Preview\n';
+    // Apply imported changes via sync manager
+    const applyResult = await ctx.syncManager!.applyRemoteChanges(importData.changes);
+
+    let output = 'Sync State Imported\n';
     output += '='.repeat(60) + '\n\n';
     output += `  File Version: ${importData.version}\n`;
     output += `  Exported At:  ${importData.exportedAt}\n`;
     output += `  Source Node:  ${importData.state.nodeId}\n`;
-    output += `  Sequence:     ${importData.state.sequence}\n`;
-    output += `  Changes:      ${importData.changes.length}\n`;
-    output += '\n';
-    output += '  Note: Full import would require applyRemoteChanges().\n';
-    output += '  This preview validates the file format.\n';
+    output += `  Total Changes: ${importData.changes.length}\n`;
+    output += `  Applied:       ${applyResult.applied}\n`;
+    output += `  Conflicts:     ${applyResult.conflicts}\n`;
+
+    if (applyResult.resolved && applyResult.resolved.length > 0) {
+      output += '\n  Resolved Conflicts:\n';
+      for (const r of applyResult.resolved) {
+        output += `    - ${r}\n`;
+      }
+    }
 
     return { success: true, data: output };
   } catch (error) {

@@ -87,7 +87,14 @@ export class CLIDashboardServer {
     // Middleware
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(cors({
-      origin: '*',
+      origin: (origin, callback) => {
+        // Allow same-origin (no origin header) and localhost variants
+        if (!origin || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
       methods: ['GET', 'POST', 'PUT', 'DELETE'],
       allowedHeaders: ['Content-Type', 'Authorization'],
     }));
@@ -669,7 +676,11 @@ export class CLIDashboardServer {
         this.ensureInitialized();
 
         const { type } = req.params;
-        const { neuronId, targetId, depth = 3 } = req.body;
+        const { neuronId, targetId } = req.body;
+        // Cap depth to prevent DoS via unbounded graph traversal
+        const rawDepth = typeof req.body.depth === 'number' ? req.body.depth : 3;
+        const depth = Math.min(Math.max(1, rawDepth), 10);
+        const MAX_RESULTS = 200;
 
         if (!neuronId) {
           return res.status(400).json({ error: 'neuronId is required' });
@@ -685,7 +696,7 @@ export class CLIDashboardServer {
         const results: Array<{ id: string; distance: number; path: string[] }> = [];
 
         const traverse = async (currentId: string, currentDepth: number, path: string[]) => {
-          if (currentDepth > depth || visited.has(currentId)) return;
+          if (currentDepth > depth || visited.has(currentId) || results.length >= MAX_RESULTS) return;
           visited.add(currentId);
 
           const synapses = type === 'backward'
@@ -721,16 +732,23 @@ export class CLIDashboardServer {
     });
 
     // ----------------------------------------------------------------
-    // 16. GET /attractors - List attractors (placeholder)
+    // 16. GET /attractors - List attractors from persistent store
     // ----------------------------------------------------------------
     api.get('/attractors', async (_req: Request, res: Response, next: NextFunction) => {
       try {
-        // Attractors are managed in-memory by the orchestrator
-        // Return placeholder for dashboard
-        res.json({
-          attractors: [],
-          message: 'Attractors are managed via CLI. Use: nmt attractor list',
-        });
+        this.ensureInitialized();
+        // Load attractors from probabilistic store if available
+        const { ProbabilisticStore } = await import('../storage/probabilistic-store.js');
+        const probStore = new ProbabilisticStore({ dataDir: this.dataDir });
+        await probStore.init();
+        const data = await probStore.loadAttractors();
+        await probStore.close();
+
+        if (data && typeof data === 'object' && 'attractors' in data) {
+          res.json({ attractors: (data as { attractors: unknown[] }).attractors });
+        } else {
+          res.json({ attractors: [], message: 'No attractors persisted. Use: nmt attractor create' });
+        }
       } catch (err) {
         next(err);
       }
@@ -759,37 +777,195 @@ export class CLIDashboardServer {
     });
 
     // ----------------------------------------------------------------
-    // 18. GET /learning/stats - Learning statistics
+    // 18. GET /learning/stats - Learning statistics from persistent store
     // ----------------------------------------------------------------
     api.get('/learning/stats', async (_req: Request, res: Response, next: NextFunction) => {
       try {
-        res.json({
-          sessions: 0,
-          totalExtractions: 0,
-          patterns: 0,
-          outcomes: 0,
-          message: 'Learning is managed via CLI. Use: nmt learn session stats',
-        });
+        this.ensureInitialized();
+        const { ProbabilisticStore } = await import('../storage/probabilistic-store.js');
+        const probStore = new ProbabilisticStore({ dataDir: this.dataDir });
+        await probStore.init();
+        const data = await probStore.loadLearning();
+        await probStore.close();
+
+        if (data && typeof data === 'object') {
+          const d = data as Record<string, unknown>;
+          res.json({
+            sessions: d.sessions ?? 0,
+            totalExtractions: d.totalExtracts ?? d.extracts ?? 0,
+            patterns: d.patterns ?? 0,
+            outcomes: d.outcomes ?? 0,
+          });
+        } else {
+          res.json({ sessions: 0, totalExtractions: 0, patterns: 0, outcomes: 0 });
+        }
       } catch (err) {
         next(err);
       }
     });
 
     // ----------------------------------------------------------------
-    // 19. GET /probabilistic/stats - Probabilistic system stats
+    // 19. GET /probabilistic/stats - Probabilistic system stats from persistent store
     // ----------------------------------------------------------------
     api.get('/probabilistic/stats', async (_req: Request, res: Response, next: NextFunction) => {
       try {
-        res.json({
-          totalNeurons: 0,
-          withStates: 0,
-          avgUncertainty: 0,
-          entangledPairs: 0,
-          message: 'Probabilistic features managed via CLI. Use: nmt prob metrics',
-        });
+        this.ensureInitialized();
+        const { ProbabilisticStore } = await import('../storage/probabilistic-store.js');
+        const probStore = new ProbabilisticStore({ dataDir: this.dataDir });
+        await probStore.init();
+        const data = await probStore.loadNeurons();
+        await probStore.close();
+
+        if (data && typeof data === 'object') {
+          const d = data as Record<string, unknown>;
+          res.json({
+            totalNeurons: d.totalNeurons ?? d.count ?? 0,
+            withStates: d.withStates ?? 0,
+            avgUncertainty: d.avgUncertainty ?? d.avgEntropy ?? 0,
+            entangledPairs: d.entangledPairs ?? 0,
+          });
+        } else {
+          res.json({ totalNeurons: 0, withStates: 0, avgUncertainty: 0, entangledPairs: 0 });
+        }
       } catch (err) {
         next(err);
       }
+    });
+
+    // Valid DB driver types (allowlist to prevent user-supplied strings in error messages)
+    const VALID_DB_DRIVERS = ['mysql', 'mariadb', 'mongodb'];
+
+    // ----------------------------------------------------------------
+    // 20. POST /db/connect - Test DB connection
+    // ----------------------------------------------------------------
+    api.post('/db/connect', async (req: Request, res: Response, next: NextFunction) => {
+      let connector: import('../connectors/types.js').IDBConnector | null = null;
+      try {
+        const { driver, host, port, user, password, database, uri } = req.body;
+        if (!driver || !VALID_DB_DRIVERS.includes(driver)) {
+          res.status(400).json({ error: `Invalid driver. Must be one of: ${VALID_DB_DRIVERS.join(', ')}` });
+          return;
+        }
+        if (!database && !uri) {
+          res.status(400).json({ error: 'database (or uri for mongodb) is required' });
+          return;
+        }
+        const { createConnector } = await import('../connectors/index.js');
+        connector = await createConnector(driver);
+        await connector.connect({ driver, host, port, user, password, database, uri });
+        await connector.disconnect();
+        connector = null;
+        res.json({ connected: true, database, driver });
+      } catch (err) {
+        if (connector) {
+          try { await connector.disconnect(); } catch { /* ignore cleanup error */ }
+        }
+        next(err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // 21. POST /db/schema - Get external DB schema
+    // ----------------------------------------------------------------
+    api.post('/db/schema', async (req: Request, res: Response, next: NextFunction) => {
+      let connector: import('../connectors/types.js').IDBConnector | null = null;
+      try {
+        const { driver, host, port, user, password, database, uri } = req.body;
+        if (!driver || !VALID_DB_DRIVERS.includes(driver)) {
+          res.status(400).json({ error: `Invalid driver. Must be one of: ${VALID_DB_DRIVERS.join(', ')}` });
+          return;
+        }
+        const { createConnector } = await import('../connectors/index.js');
+        connector = await createConnector(driver);
+        await connector.connect({ driver, host, port, user, password, database, uri });
+        const schema = await connector.getSchema();
+        await connector.disconnect();
+        connector = null;
+        res.json(schema);
+      } catch (err) {
+        if (connector) {
+          try { await connector.disconnect(); } catch { /* ignore cleanup error */ }
+        }
+        next(err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // 22. POST /db/import - Import external DB rows into NMT
+    // ----------------------------------------------------------------
+    api.post('/db/import', async (req: Request, res: Response, next: NextFunction) => {
+      let connector: import('../connectors/types.js').IDBConnector | null = null;
+      try {
+        this.ensureInitialized();
+        const { connection, table, limit, batchSize, tags } = req.body;
+        if (!connection?.driver || !VALID_DB_DRIVERS.includes(connection.driver) || !table) {
+          res.status(400).json({ error: 'Valid connection.driver and table are required' });
+          return;
+        }
+        const { createConnector } = await import('../connectors/index.js');
+        const { DBBridgeService } = await import('../services/db-bridge.js');
+        connector = await createConnector(connection.driver);
+        await connector.connect(connection);
+        const bridge = new DBBridgeService(connector, this.ingestionService, this.neuronStore);
+        const result = await bridge.importTable({
+          table,
+          limit: limit ?? undefined,
+          batchSize: batchSize ?? 1000,
+          tags: tags ?? [],
+          autoConnect: true,
+        });
+        await connector.disconnect();
+        connector = null;
+        res.json(result);
+      } catch (err) {
+        if (connector) {
+          try { await connector.disconnect(); } catch { /* ignore cleanup error */ }
+        }
+        next(err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // 23. POST /db/export - Export NMT neurons to external DB
+    // ----------------------------------------------------------------
+    api.post('/db/export', async (req: Request, res: Response, next: NextFunction) => {
+      let connector: import('../connectors/types.js').IDBConnector | null = null;
+      try {
+        this.ensureInitialized();
+        const { connection, table, tags, limit, includeEmbeddings, includeSynapses, restoreSourceData } = req.body;
+        if (!connection?.driver || !VALID_DB_DRIVERS.includes(connection.driver)) {
+          res.status(400).json({ error: `Invalid connection.driver. Must be one of: ${VALID_DB_DRIVERS.join(', ')}` });
+          return;
+        }
+        const { createConnector } = await import('../connectors/index.js');
+        const { DBBridgeService } = await import('../services/db-bridge.js');
+        connector = await createConnector(connection.driver);
+        await connector.connect(connection);
+        const bridge = new DBBridgeService(connector, this.ingestionService, this.neuronStore);
+        const result = await bridge.exportNeurons({
+          table: table ?? 'nmt_neurons',
+          tags: tags ?? undefined,
+          limit: limit ?? undefined,
+          includeEmbeddings: includeEmbeddings ?? true,
+          includeSynapses: includeSynapses ?? true,
+          restoreSourceData: restoreSourceData ?? false,
+        });
+        await connector.disconnect();
+        connector = null;
+        res.json(result);
+      } catch (err) {
+        if (connector) {
+          try { await connector.disconnect(); } catch { /* ignore cleanup error */ }
+        }
+        next(err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // 24. POST /db/disconnect - Disconnect (no-op, stateless)
+    // ----------------------------------------------------------------
+    api.post('/db/disconnect', (_req: Request, res: Response) => {
+      res.json({ disconnected: true });
     });
 
     // Mount all API routes
@@ -833,13 +1009,27 @@ export class CLIDashboardServer {
       });
     });
 
-    // Global error handler
+    // Global error handler — sanitize messages to prevent leaking internal details
     this.app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-      console.error('CLI Dashboard error:', err.message);
+      // Sanitize log output: strip credentials from error messages
+      const safeLog = err.message
+        .replace(/password[=:]\s*\S+/gi, 'password=***')
+        .replace(/mongodb:\/\/[^@]+@/gi, 'mongodb://***@');
+      console.error('CLI Dashboard error:', safeLog);
 
-      res.status(500).json({
-        error: 'Internal Server Error',
-        message: err.message,
+      // Only expose known safe errors to clients
+      const isClientError =
+        err.message.includes('is required') ||
+        err.message.includes('not found') ||
+        err.message.includes('not initialized') ||
+        err.message.includes('Invalid') ||
+        err.message.includes('not installed') ||
+        err.message.includes('Unsupported driver') ||
+        err.message.includes('not allowed');
+
+      res.status(isClientError ? 400 : 500).json({
+        error: isClientError ? 'Bad Request' : 'Internal Server Error',
+        message: isClientError ? err.message : 'An unexpected error occurred. Check server logs for details.',
       });
     });
   }

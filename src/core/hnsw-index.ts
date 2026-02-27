@@ -382,13 +382,22 @@ export class HNSWIndex {
     results.push({ id: entryId, score: entrySim, distance: 1 - entrySim });
     visited.add(entryId);
 
+    // Helper: insert into sorted array (descending by score) using binary search
+    const sortedInsert = (arr: SearchResult[], item: SearchResult) => {
+      let lo = 0, hi = arr.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (arr[mid].score > item.score) lo = mid + 1;
+        else hi = mid;
+      }
+      arr.splice(lo, 0, item);
+    };
+
     while (candidates.length > 0) {
-      // Get candidate with highest similarity
-      candidates.sort((a, b) => b.score - a.score);
+      // Get candidate with highest similarity (first element, already sorted)
       const current = candidates.shift()!;
 
       // Check if worst result is better than current candidate
-      results.sort((a, b) => b.score - a.score);
       if (results.length >= ef && current.score < results[results.length - 1].score) {
         break;
       }
@@ -410,22 +419,19 @@ export class HNSWIndex {
         const sim = this.similarity(query, neighbor.embedding);
         const result: SearchResult = { id: neighborId, score: sim, distance: 1 - sim };
 
-        // Add to candidates if better than worst result or results not full
+        // Add to candidates/results if better than worst result or not full
         if (results.length < ef || sim > results[results.length - 1].score) {
-          candidates.push(result);
-          results.push(result);
+          sortedInsert(candidates, result);
+          sortedInsert(results, result);
 
           // Keep only ef best results
           if (results.length > ef) {
-            results.sort((a, b) => b.score - a.score);
             results.pop();
           }
         }
       }
     }
 
-    // Return sorted results
-    results.sort((a, b) => b.score - a.score);
     return results;
   }
 

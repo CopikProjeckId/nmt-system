@@ -701,4 +701,9 @@ if (isMainModule) {
     await server.close();
     process.exit(0);
   });
+
+  process.on('SIGTERM', async () => {
+    await server.close();
+    process.exit(0);
+  });
 }

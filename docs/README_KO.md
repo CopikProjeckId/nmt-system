@@ -53,6 +53,11 @@ Extract → Pattern → Process → Outcome
 
 Vector Clock, Change Journal, 충돌 해결.
 
+### 7. DB Bridge (SQL ↔ NMT)
+
+외부 데이터베이스와 NMT 간 양방향 데이터 전송. MySQL/MariaDB, MongoDB 지원.
+Import 시 DDL 메타데이터(컬럼 타입, FK, 인덱스, CHECK, 트리거) 100% 보존, Export 시 원본 구조 그대로 복원.
+
 ---
 
 ## 설치
@@ -84,6 +89,7 @@ nmt infer forward <neuron-id> --depth 3
 | **끌개** | attractor create, path, influence |
 | **검증** | verify neuron, proof, diff, batch |
 | **동기화** | sync status, changes, export, import |
+| **DB Bridge** | REST API: /db/connect, /db/schema, /db/import, /db/export |
 
 ---
 

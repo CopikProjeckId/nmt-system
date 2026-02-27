@@ -874,13 +874,32 @@ import { NeuronStore } from 'nmt-system';
 const store = new NeuronStore({ dataDir: './data' });
 await store.init();
 
-// Create neuron
+// Create neuron (basic)
 const neuron = await store.createNeuron({
   embedding: new Float32Array(384),
   chunkHashes: ['hash1'],
   merkleRoot: 'root123',
   sourceType: 'document',
-  tags: ['test']
+  tags: ['test'],
+});
+
+// Create neuron with DB round-trip metadata (all source* fields optional)
+const dbNeuron = await store.createNeuron({
+  embedding, chunkHashes, merkleRoot,
+  sourceType: 'db:users',
+  tags: ['db-import', 'users'],
+  sourceRow: { id: 1, name: '홍길동', score: 85 },
+  sourceColumns: [
+    { name: 'id', type: 'INT', nullable: false, isPrimary: true, autoIncrement: true },
+    { name: 'name', type: 'VARCHAR(100)', nullable: false, isPrimary: false },
+  ],
+  sourceForeignKeys: [{ column: 'dept_id', refTable: 'depts', refColumn: 'id' }],
+  sourceIndexes: [{ name: 'idx_name', columns: ['name'], unique: false }],
+  sourceChecks: [{ name: 'chk_score', clause: '`score` >= 0' }],
+  sourceTriggers: [{ name: 'trg_audit', timing: 'AFTER', event: 'UPDATE', body: 'BEGIN ... END' }],
+  sourceTable: 'users',
+  sourceEngine: 'InnoDB',
+  sourceCharset: 'utf8mb4',
 });
 
 // CRUD operations
@@ -955,12 +974,25 @@ const service = new IngestionService({
 });
 
 // Ingest text
-const result = await service.ingestText({
-  text: "Your document content here...",
+const neuron = await service.ingestText("Your document content here...", {
   sourceType: "document",
-  tags: ["ai", "research"]
+  tags: ["ai", "research"],
 });
-// Returns: { neuronId, chunkCount, merkleRoot }
+
+// Ingest text with DB round-trip metadata
+const dbNeuron = await service.ingestText(rowText, {
+  sourceType: "db:users",
+  tags: ["db-import", "users"],
+  sourceRow: { id: 1, name: "홍길동" },
+  sourceColumns: [/* SourceColumnSchema[] */],
+  sourceForeignKeys: [/* SourceForeignKey[] */],
+  sourceIndexes: [/* SourceIndex[] */],
+  sourceChecks: [/* SourceCheckConstraint[] */],
+  sourceTriggers: [/* SourceTrigger[] */],
+  sourceTable: "users",
+  sourceEngine: "InnoDB",
+  sourceCharset: "utf8mb4",
+});
 
 // Ingest file
 const result2 = await service.ingestFile({
@@ -983,7 +1015,81 @@ const results = await service.ingestBatch([
 ]);
 ```
 
-## 7.2 QueryService
+## 7.2 DBBridgeService
+
+외부 데이터베이스 ↔ NMT 양방향 전송. 원본 DDL 구조와 데이터를 100% 보존하는 round-trip fidelity 지원.
+
+**지원 드라이버**: MySQL/MariaDB (`mysql2`), MongoDB (`mongodb`)
+
+```typescript
+import { DBBridgeService } from 'nmt-system/services/db-bridge';
+import { createConnector } from 'nmt-system/connectors';
+
+const connector = await createConnector('mysql');
+await connector.connect({
+  driver: 'mysql', host: 'localhost', port: 3306,
+  user: 'root', password: '', database: 'mydb',
+});
+
+const bridge = new DBBridgeService(connector, ingestionService, neuronStore);
+
+// Import: DB rows → NMT neurons
+// 각 행의 원본 데이터 + DDL 메타(컬럼 타입, PK, FK, INDEX, CHECK, TRIGGER, ENGINE, CHARSET)가
+// NeuronMetadata에 저장됨
+const importResult = await bridge.importTable({
+  table: 'users',
+  limit: 1000,
+  batchSize: 500,
+  tags: ['production'],
+  autoConnect: true,  // FK 기반 ASSOCIATIVE 시냅스 자동 생성
+});
+// Returns: { neuronsCreated, synapsesCreated, rowsProcessed, errors, duration, sourceTable }
+
+// Export: NMT neurons → DB tables
+const exportResult = await bridge.exportNeurons({
+  table: 'nmt_neurons',
+  includeEmbeddings: true,
+  includeSynapses: true,
+  restoreSourceData: false,  // false: neuron 메타데이터 스키마로 export
+});
+
+// Export with round-trip fidelity (원본 스키마 + 데이터 복원)
+const roundTripResult = await bridge.exportNeurons({
+  table: 'users_restored',
+  restoreSourceData: true,   // 원본 DDL 구조 + 데이터 100% 복원
+  includeSynapses: true,
+});
+// Returns: { neuronsExported, synapsesExported, tablesCreated, duration, sourceDataRestored }
+
+await connector.disconnect();
+```
+
+### Round-Trip Fidelity 보존 범위
+
+| DDL 요소 | Import 수집 | Export 복원 |
+|----------|:-----------:|:-----------:|
+| 컬럼 데이터 값 | `sourceRow` | `desanitizeRow()` |
+| 컬럼 타입 (VARCHAR(255), DECIMAL(10,2)) | `sourceColumns.type` (COLUMN_TYPE) | `createTable` DDL |
+| nullable / NOT NULL | `sourceColumns.nullable` | DDL |
+| PRIMARY KEY (복합) | `sourceColumns.isPrimary` | DDL |
+| FOREIGN KEY | `sourceForeignKeys` | DDL |
+| AUTO_INCREMENT | `sourceColumns.autoIncrement` | DDL |
+| UNIQUE INDEX | `sourceColumns.isUnique` + `sourceIndexes` | DDL |
+| INDEX (복합) | `sourceIndexes` | DDL |
+| DEFAULT (값 + 함수) | `sourceColumns.defaultValue` | DDL |
+| ON UPDATE CURRENT_TIMESTAMP | `sourceColumns.extra` | DDL |
+| CHECK constraint | `sourceChecks` | DDL (MySQL 8.0.16+) |
+| TRIGGER | `sourceTriggers` | `CREATE TRIGGER` |
+| ENGINE | `sourceEngine` | `ENGINE=...` |
+| CHARSET | `sourceCharset` | `DEFAULT CHARSET=...` |
+
+### Mixed Export 동작
+
+`restoreSourceData: true` 시:
+- `sourceRow` 있는 뉴런 → 원본 테이블 스키마로 export
+- `sourceRow` 없는 뉴런 → `{table}_nmt_meta` 폴백 테이블 (neuron 메타 스키마)
+
+## 7.3 QueryService
 
 의미 기반 검색:
 
@@ -1293,6 +1399,101 @@ Response 201:
     { "neuronId": "uuid1", "chunkCount": 3 },
     { "neuronId": "uuid2", "chunkCount": 5 }
   ]
+}
+```
+
+### DB Bridge
+
+```http
+POST /api/v1/db/connect
+Content-Type: application/json
+
+{
+  "driver": "mysql",
+  "host": "localhost",
+  "port": 3306,
+  "user": "root",
+  "password": "",
+  "database": "mydb"
+}
+
+Response 200:
+{ "connected": true, "database": "mydb", "driver": "mysql" }
+```
+
+```http
+POST /api/v1/db/schema
+Content-Type: application/json
+
+{ "driver": "mysql", "host": "localhost", "database": "mydb", "user": "root" }
+
+Response 200:
+{
+  "name": "mydb",
+  "driver": "mysql",
+  "tables": [
+    {
+      "name": "users",
+      "columns": [
+        { "name": "id", "type": "INT", "nullable": false, "isPrimary": true,
+          "autoIncrement": true, "isUnique": false }
+      ],
+      "primaryKey": ["id"],
+      "foreignKeys": [],
+      "indexes": [{ "name": "idx_name", "columns": ["name"], "unique": false }],
+      "checks": [{ "name": "chk_score", "clause": "`score` >= 0" }],
+      "triggers": [{ "name": "trg_audit", "timing": "AFTER", "event": "UPDATE", "body": "..." }],
+      "engine": "InnoDB",
+      "charset": "utf8mb4",
+      "rowCount": 1000
+    }
+  ]
+}
+```
+
+```http
+POST /api/v1/db/import
+Content-Type: application/json
+
+{
+  "connection": { "driver": "mysql", "host": "localhost", "database": "mydb", "user": "root" },
+  "table": "users",
+  "limit": 1000,
+  "batchSize": 500,
+  "tags": ["production"]
+}
+
+Response 200:
+{
+  "neuronsCreated": 1000,
+  "synapsesCreated": 50,
+  "rowsProcessed": 1000,
+  "errors": [],
+  "duration": 5432,
+  "sourceTable": "users"
+}
+```
+
+```http
+POST /api/v1/db/export
+Content-Type: application/json
+
+{
+  "connection": { "driver": "mysql", "host": "localhost", "database": "target_db", "user": "root" },
+  "table": "users_restored",
+  "tags": ["production"],
+  "includeEmbeddings": true,
+  "includeSynapses": true,
+  "restoreSourceData": true
+}
+
+Response 200:
+{
+  "neuronsExported": 1000,
+  "synapsesExported": 50,
+  "tablesCreated": ["users_restored", "users_restored_synapses"],
+  "duration": 3210,
+  "sourceDataRestored": 1000
 }
 ```
 
@@ -2434,6 +2635,9 @@ type StorageBackend =
   | 'leveldb'
   | 'hybrid'
   | 'redis';
+
+type NeuronType = 'fact' | 'transient';
+type DriverType = 'mysql' | 'mariadb' | 'mongodb';
 ```
 
 ## 15.2 Interfaces
@@ -2474,6 +2678,67 @@ interface NeuronMetadata {
   lastAccessed: string;
   sourceType: string;
   tags: string[];
+  // Neuron classification
+  neuronType?: NeuronType;
+  ttl?: number;
+  expiresAt?: number;
+  importance?: number;
+  verifiedAt?: string;
+  // DB Bridge round-trip fidelity
+  sourceRow?: Record<string, unknown>;
+  sourceColumns?: SourceColumnSchema[];
+  sourceForeignKeys?: SourceForeignKey[];
+  sourceIndexes?: SourceIndex[];
+  sourceChecks?: SourceCheckConstraint[];
+  sourceTriggers?: SourceTrigger[];
+  sourceTable?: string;
+  sourceEngine?: string;
+  sourceCharset?: string;
+}
+
+// DB Bridge source types (round-trip fidelity)
+interface SourceColumnSchema {
+  name: string; type: string; nullable: boolean; isPrimary: boolean;
+  isForeign?: boolean; foreignTable?: string; foreignColumn?: string;
+  defaultValue?: unknown; autoIncrement?: boolean; isUnique?: boolean;
+  maxLength?: number; extra?: string;
+}
+interface SourceForeignKey { column: string; refTable: string; refColumn: string; }
+interface SourceIndex { name: string; columns: string[]; unique: boolean; }
+interface SourceCheckConstraint { name: string; clause: string; }
+interface SourceTrigger {
+  name: string; timing: 'BEFORE' | 'AFTER';
+  event: 'INSERT' | 'UPDATE' | 'DELETE'; body: string;
+}
+
+// DB Connector types
+interface ColumnSchema {
+  name: string; type: string; nullable: boolean; isPrimary: boolean;
+  isForeign: boolean; foreignTable?: string; foreignColumn?: string;
+  defaultValue?: unknown; autoIncrement?: boolean; isUnique?: boolean;
+  maxLength?: number; extra?: string;
+}
+interface TableIndex { name: string; columns: string[]; unique: boolean; }
+interface CheckConstraint { name: string; clause: string; }
+interface TableTrigger {
+  name: string; timing: 'BEFORE' | 'AFTER';
+  event: 'INSERT' | 'UPDATE' | 'DELETE'; body: string;
+}
+interface TableSchema {
+  name: string; columns: ColumnSchema[]; primaryKey: string[];
+  foreignKeys: Array<{ column: string; refTable: string; refColumn: string }>;
+  indexes?: TableIndex[]; checks?: CheckConstraint[];
+  triggers?: TableTrigger[]; engine?: string; charset?: string;
+  rowCount: number;
+}
+interface ImportOptions {
+  table: string; limit?: number; batchSize?: number;
+  tags?: string[]; autoConnect?: boolean;
+}
+interface ExportOptions {
+  table?: string; tags?: string[]; limit?: number;
+  includeEmbeddings?: boolean; includeSynapses?: boolean;
+  restoreSourceData?: boolean;
 }
 
 // Synapse
@@ -2610,6 +2875,27 @@ export { EfficientRAGPipeline } from './services/efficient-rag';
 export { DynamicLearningService } from './services/learning';
 export { AutoLearningService } from './services/auto-learning';
 export { WebSearchService } from './services/web-search';
+export { DBBridgeService } from './services/db-bridge';
+
+// Connectors (lazy-loaded — optional dependencies)
+export { createConnector } from './connectors';
+export type {
+  DriverType,
+  DBConnectionConfig,
+  ColumnSchema,
+  TableSchema,
+  DatabaseSchema,
+  DBRow,
+  ReadOptions,
+  IDBConnector,
+  ImportOptions,
+  ImportResult,
+  ExportOptions,
+  ExportResult,
+} from './connectors/types';
+// Individual connectors (direct import when needed):
+//   import { MySQLConnector } from './connectors/mysql-connector';
+//   import { MongoDBConnector } from './connectors/mongodb-connector';
 
 // API
 export { NMTServer, createServer } from './api/server';
@@ -2641,6 +2927,11 @@ export * from './types';
 | **CAS** | Content-Addressable Storage |
 | **RAG** | Retrieval-Augmented Generation |
 | **CDC** | Content-Defined Chunking |
+| **DB Bridge** | Service for bidirectional SQL ↔ NMT data transfer |
+| **Round-Trip Fidelity** | Ability to import and export data with 100% DDL/data preservation |
+| **sourceRow** | Original database row stored in neuron metadata for lossless export |
+| **DDL** | Data Definition Language (CREATE TABLE, indexes, constraints) |
+| **IDBConnector** | Interface for database connectors (MySQL, MongoDB) |
 
 ## B. Version History
 
@@ -2652,6 +2943,16 @@ export * from './types';
 | - | - | Services: Ingestion, Query, RAG |
 | - | - | CLI: init, server, backup, restore |
 | - | - | API: REST endpoints |
+| 1.1.0 | 2026-02 | DB Bridge & Round-Trip Fidelity |
+| - | - | DB Connectors: MySQL/MariaDB, MongoDB |
+| - | - | DBBridgeService: SQL ↔ NMT import/export |
+| - | - | NeuronMetadata: sourceRow, sourceColumns, sourceForeignKeys |
+| - | - | NeuronMetadata: sourceIndexes, sourceChecks, sourceTriggers |
+| - | - | NeuronMetadata: sourceTable, sourceEngine, sourceCharset |
+| - | - | Export restoreSourceData: 100% DDL round-trip fidelity |
+| - | - | REST API: /db/connect, /db/schema, /db/import, /db/export |
+| - | - | Dashboard: DB Bridge UI with Restore Source Data toggle |
+| - | - | MySQL: COLUMN_TYPE precision, SQL function defaults, ON UPDATE |
 
 ## C. License
 
@@ -2673,4 +2974,4 @@ PolyForm Noncommercial License 1.0.0
 
 *NMT System - Verifiable Semantic Knowledge Graph*
 
-*Copyright 2024. All rights reserved.*
+*Copyright 2024-2026. All rights reserved.*

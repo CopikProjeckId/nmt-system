@@ -10,7 +10,12 @@ import type {
   Chunk,
   MerkleTree,
   JobStatus,
-  IChunkStore
+  IChunkStore,
+  SourceColumnSchema,
+  SourceForeignKey,
+  SourceIndex,
+  SourceCheckConstraint,
+  SourceTrigger,
 } from '../types/index.js';
 import { ChunkEngine } from '../core/chunk-engine.js';
 import { MerkleEngine } from '../core/merkle-engine.js';
@@ -44,6 +49,15 @@ export interface IngestionOptions {
   chunkSize?: number;
   autoConnect?: boolean;
   connectionThreshold?: number;
+  sourceRow?: Record<string, unknown>;
+  sourceColumns?: SourceColumnSchema[];
+  sourceForeignKeys?: SourceForeignKey[];
+  sourceIndexes?: SourceIndex[];
+  sourceChecks?: SourceCheckConstraint[];
+  sourceTriggers?: SourceTrigger[];
+  sourceTable?: string;
+  sourceEngine?: string;
+  sourceCharset?: string;
 }
 
 /**
@@ -190,7 +204,16 @@ export class IngestionService {
         sourceType: options.sourceType ?? 'text',
         tags: options.tags,
         autoConnect: options.autoConnect,
-        connectionThreshold: options.connectionThreshold
+        connectionThreshold: options.connectionThreshold,
+        sourceRow: options.sourceRow,
+        sourceColumns: options.sourceColumns,
+        sourceForeignKeys: options.sourceForeignKeys,
+        sourceIndexes: options.sourceIndexes,
+        sourceChecks: options.sourceChecks,
+        sourceTriggers: options.sourceTriggers,
+        sourceTable: options.sourceTable,
+        sourceEngine: options.sourceEngine,
+        sourceCharset: options.sourceCharset,
       });
 
       job.neuronId = neuron.id;
@@ -345,7 +368,16 @@ export class IngestionService {
         sourceType: options.sourceType ?? 'text',
         tags: options.tags,
         autoConnect: options.autoConnect,
-        connectionThreshold: options.connectionThreshold
+        connectionThreshold: options.connectionThreshold,
+        sourceRow: options.sourceRow,
+        sourceColumns: options.sourceColumns,
+        sourceForeignKeys: options.sourceForeignKeys,
+        sourceIndexes: options.sourceIndexes,
+        sourceChecks: options.sourceChecks,
+        sourceTriggers: options.sourceTriggers,
+        sourceTable: options.sourceTable,
+        sourceEngine: options.sourceEngine,
+        sourceCharset: options.sourceCharset,
       });
 
       job.neuronId = neuron.id;

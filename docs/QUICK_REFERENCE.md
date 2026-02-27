@@ -79,6 +79,31 @@ curl http://localhost:3000/api/v1/clusters
 
 ---
 
+## DB Bridge (SQL ↔ NMT)
+
+### DB 연결
+```bash
+curl -X POST http://localhost:3000/api/v1/db/connect \
+  -H "Content-Type: application/json" \
+  -d '{"driver": "mysql", "host": "localhost", "database": "mydb", "user": "root", "password": "pass"}'
+```
+
+### DB → NMT 가져오기
+```bash
+curl -X POST http://localhost:3000/api/v1/db/import \
+  -H "Content-Type: application/json" \
+  -d '{"table": "users", "limit": 1000}'
+```
+
+### NMT → DB 내보내기 (원본 복원)
+```bash
+curl -X POST http://localhost:3000/api/v1/db/export \
+  -H "Content-Type: application/json" \
+  -d '{"tags": ["db-import", "users"], "restoreSourceData": true}'
+```
+
+---
+
 ## 문제 해결
 
 ### 서버 안 켜짐 (LEVEL_LOCKED)
@@ -128,3 +153,7 @@ taskkill /F /PID 프로세스ID
 | 라벨 전파 | POST | `/api/v1/communities/label-propagation` |
 | 통계 | GET | `/api/v1/stats` |
 | 상태 | GET | `/api/v1/health` |
+| DB 연결 | POST | `/api/v1/db/connect` |
+| DB 스키마 | POST | `/api/v1/db/schema` |
+| DB 가져오기 | POST | `/api/v1/db/import` |
+| DB 내보내기 | POST | `/api/v1/db/export` |

@@ -36,7 +36,33 @@ export async function cmdLearn(
         return { success: false, error: `Neuron not found: ${neuronId}` };
       }
 
-      const content = `Content from neuron ${neuronId}`;
+      // Build content from neuron metadata and connections
+      const parts: string[] = [];
+      if (neuron.metadata.tags.length > 0) {
+        parts.push(`Tags: ${neuron.metadata.tags.join(', ')}`);
+      }
+      if (neuron.metadata.sourceType) {
+        parts.push(`Source: ${neuron.metadata.sourceType}`);
+      }
+      parts.push(`Chunks: ${neuron.chunkHashes.length}`);
+      parts.push(`Connections: ${neuron.outgoingSynapses.length} out, ${neuron.incomingSynapses.length} in`);
+
+      // Fetch connected neuron tags for richer context
+      const connectedTags: string[] = [];
+      for (const synId of neuron.outgoingSynapses.slice(0, 5)) {
+        const syn = await ctx.neuronStore.getSynapse(synId);
+        if (syn) {
+          const target = await ctx.neuronStore.getNeuron(syn.targetId);
+          if (target?.metadata.tags.length) {
+            connectedTags.push(...target.metadata.tags);
+          }
+        }
+      }
+      if (connectedTags.length > 0) {
+        parts.push(`Related: ${[...new Set(connectedTags)].join(', ')}`);
+      }
+
+      const content = parts.join('\n');
       const extracts = await ctx.learningSystem.extractMeaningful(neuronId, content);
 
       let output = `Extracted Meaningful Content from ${neuronId}:\n`;

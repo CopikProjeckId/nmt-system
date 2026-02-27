@@ -97,6 +97,46 @@ nmt verify proof <neuron-id> --index 2
 
 ---
 
+## DB Bridge — External Database Integration
+
+Import data from MySQL/MariaDB/MongoDB into NMT and export back with 100% DDL fidelity.
+
+### Supported Databases
+
+| DB | Driver | Package |
+|----|--------|---------|
+| MySQL | `mysql` | `npm install mysql2` |
+| MariaDB | `mariadb` | `npm install mysql2` |
+| MongoDB | `mongodb` | `npm install mongodb` |
+
+### Connect
+
+```bash
+curl -X POST http://localhost:3000/api/v1/db/connect \
+  -H "Content-Type: application/json" \
+  -d '{"driver": "mysql", "host": "localhost", "database": "mydb", "user": "root", "password": "pass"}'
+```
+
+### Import (DB → NMT)
+
+```bash
+curl -X POST http://localhost:3000/api/v1/db/import \
+  -d '{"table": "users", "limit": 5000}'
+```
+
+Each row becomes a neuron. Original data (column values, DDL structure) is preserved in metadata.
+
+### Export (NMT → DB)
+
+```bash
+curl -X POST http://localhost:3000/api/v1/db/export \
+  -d '{"tags": ["db-import", "users"], "restoreSourceData": true}'
+```
+
+With `restoreSourceData: true`, the original column types, foreign keys, indexes, CHECK constraints, triggers, and engine settings are fully restored.
+
+---
+
 ## Configuration
 
 ```env

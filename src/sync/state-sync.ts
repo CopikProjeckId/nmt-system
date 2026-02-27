@@ -160,6 +160,7 @@ export class StateSyncManager {
 
   private vectorClock: VectorClock;
   private merkleRoot: MerkleRoot | null = null;
+  private lastKnownSequence: number = 0;
   private initialized: boolean = false;
   private initPromise: Promise<void> | null = null;
   private peers: Map<string, SyncPeer> = new Map();
@@ -201,8 +202,9 @@ export class StateSyncManager {
     try {
       await this.journal.init();
 
-      // Restore vector clock from journal
+      // Restore vector clock and sequence from journal
       const latestSeq = await this.journal.getLatestSequence();
+      this.lastKnownSequence = latestSeq;
       if (latestSeq > 0) {
         const latestEntry = await this.journal.get(latestSeq);
         if (latestEntry) {
@@ -250,6 +252,7 @@ export class StateSyncManager {
     };
 
     const sequence = await this.journal.append(entry);
+    this.lastKnownSequence = sequence;
 
     // Emit event
     if (this.eventBus) {
@@ -437,12 +440,16 @@ export class StateSyncManager {
   /**
    * Get current local state
    */
+  /**
+   * @deprecated Use getLocalStateAsync() for accurate sequence number.
+   * This synchronous version returns the last known sequence from memory.
+   */
   getLocalState(): SyncState {
     return {
       nodeId: this.nodeId,
       merkleRoot: this.merkleRoot,
       vectorClock: this.vectorClock.clone(),
-      sequence: 0, // Will be updated by getLatestSequence
+      sequence: this.lastKnownSequence,
       lastSync: null,
     };
   }

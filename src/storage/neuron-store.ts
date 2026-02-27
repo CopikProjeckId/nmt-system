@@ -9,7 +9,13 @@ import type {
   NeuronNode,
   Synapse,
   SynapseType,
-  Embedding384
+  Embedding384,
+  NeuronType,
+  SourceColumnSchema,
+  SourceForeignKey,
+  SourceIndex,
+  SourceCheckConstraint,
+  SourceTrigger,
 } from '../types/index.js';
 import { generateUUID } from '../utils/uuid.js';
 import * as fs from 'fs/promises';
@@ -37,6 +43,20 @@ interface SerializedNeuron {
     lastAccessed: string;
     sourceType: string;
     tags: string[];
+    neuronType?: NeuronType;
+    ttl?: number;
+    expiresAt?: number;
+    importance?: number;
+    verifiedAt?: string;
+    sourceRow?: Record<string, unknown>;
+    sourceColumns?: SourceColumnSchema[];
+    sourceForeignKeys?: SourceForeignKey[];
+    sourceIndexes?: SourceIndex[];
+    sourceChecks?: SourceCheckConstraint[];
+    sourceTriggers?: SourceTrigger[];
+    sourceTable?: string;
+    sourceEngine?: string;
+    sourceCharset?: string;
   };
   outgoingSynapses: UUID[];
   incomingSynapses: UUID[];
@@ -112,6 +132,15 @@ export class NeuronStore {
     merkleRoot: string;
     sourceType?: string;
     tags?: string[];
+    sourceRow?: Record<string, unknown>;
+    sourceColumns?: SourceColumnSchema[];
+    sourceForeignKeys?: SourceForeignKey[];
+    sourceIndexes?: SourceIndex[];
+    sourceChecks?: SourceCheckConstraint[];
+    sourceTriggers?: SourceTrigger[];
+    sourceTable?: string;
+    sourceEngine?: string;
+    sourceCharset?: string;
   }): Promise<NeuronNode> {
     this.ensureInitialized();
 
@@ -127,7 +156,16 @@ export class NeuronStore {
         accessCount: 0,
         lastAccessed: now,
         sourceType: input.sourceType ?? 'unknown',
-        tags: input.tags ?? []
+        tags: input.tags ?? [],
+        ...(input.sourceRow ? { sourceRow: input.sourceRow } : {}),
+        ...(input.sourceColumns ? { sourceColumns: input.sourceColumns } : {}),
+        ...(input.sourceForeignKeys ? { sourceForeignKeys: input.sourceForeignKeys } : {}),
+        ...(input.sourceIndexes ? { sourceIndexes: input.sourceIndexes } : {}),
+        ...(input.sourceChecks ? { sourceChecks: input.sourceChecks } : {}),
+        ...(input.sourceTriggers ? { sourceTriggers: input.sourceTriggers } : {}),
+        ...(input.sourceTable ? { sourceTable: input.sourceTable } : {}),
+        ...(input.sourceEngine ? { sourceEngine: input.sourceEngine } : {}),
+        ...(input.sourceCharset ? { sourceCharset: input.sourceCharset } : {}),
       },
       outgoingSynapses: [],
       incomingSynapses: []

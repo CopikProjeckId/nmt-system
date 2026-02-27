@@ -57,14 +57,6 @@ export interface DBSCANOptions {
 }
 
 /**
- * Community detection options
- */
-export interface CommunityOptions {
-  resolution?: number;  // Louvain resolution
-  minCommunitySize?: number;
-}
-
-/**
  * Clustering Service
  */
 export class ClusteringService {

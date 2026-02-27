@@ -459,10 +459,33 @@ export class ProbabilisticNeuronManager {
         states[1].probability = 0.5;
         break;
 
-      case 'Z': // No effect on probabilities (legacy gate compatibility)
-      case 'Y':
-      case 'S':
-      case 'T':
+      case 'Z': // Phase-flip: bias toward first state
+        states[0].probability = Math.min(1, states[0].probability * 1.1);
+        states[1].probability = 1 - states[0].probability;
+        break;
+
+      case 'Y': // Combined flip + phase: swap with dampening
+        {
+          const [p0, p1] = [states[0].probability, states[1].probability];
+          states[0].probability = p1 * 0.9 + p0 * 0.1;
+          states[1].probability = p0 * 0.9 + p1 * 0.1;
+        }
+        break;
+
+      case 'S': // Quarter-phase: slight bias toward dominant state
+        {
+          const dominant = states[0].probability >= states[1].probability ? 0 : 1;
+          states[dominant].probability = Math.min(1, states[dominant].probability * 1.05);
+          states[1 - dominant].probability = 1 - states[dominant].probability;
+        }
+        break;
+
+      case 'T': // Eighth-phase: minimal perturbation
+        {
+          const dominant = states[0].probability >= states[1].probability ? 0 : 1;
+          states[dominant].probability = Math.min(1, states[dominant].probability * 1.025);
+          states[1 - dominant].probability = 1 - states[dominant].probability;
+        }
         break;
     }
 

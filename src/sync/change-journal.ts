@@ -178,19 +178,21 @@ export class ChangeJournal {
         await this.init();
       }
 
-      this.currentSequence++;
-      const sequence = this.currentSequence;
+      const nextSequence = this.currentSequence + 1;
 
       const fullEntry: ChangeEntry = {
         ...entry,
-        sequence,
+        sequence: nextSequence,
       };
 
-      const key = this.sequenceKey(sequence);
+      const key = this.sequenceKey(nextSequence);
       await this.db.put(key, JSON.stringify(fullEntry));
+
+      // Only advance sequence after successful write
+      this.currentSequence = nextSequence;
       await this.saveMeta();
 
-      return sequence;
+      return nextSequence;
     } finally {
       releaseLock();
     }
@@ -200,34 +202,45 @@ export class ChangeJournal {
    * Append multiple entries atomically
    */
   async appendBatch(entries: ChangeInput[]): Promise<number[]> {
-    if (!this.initialized) {
-      await this.init();
+    // Serialize with appendLock to prevent race conditions with append()
+    const previousLock = this.appendLock;
+    let releaseLock: () => void = () => {};
+    this.appendLock = new Promise<void>(resolve => { releaseLock = resolve; });
+
+    try {
+      await previousLock;
+
+      if (!this.initialized) {
+        await this.init();
+      }
+
+      const sequences: number[] = [];
+      const batch = this.db.batch();
+
+      for (const entry of entries) {
+        this.currentSequence++;
+        const sequence = this.currentSequence;
+        sequences.push(sequence);
+
+        const fullEntry: ChangeEntry = {
+          ...entry,
+          sequence,
+        };
+
+        batch.put(this.sequenceKey(sequence), JSON.stringify(fullEntry));
+      }
+
+      batch.put(ChangeJournal.META_KEY, JSON.stringify({
+        currentSequence: this.currentSequence,
+        nodeId: this.nodeId,
+      }));
+
+      await batch.write();
+
+      return sequences;
+    } finally {
+      releaseLock();
     }
-
-    const sequences: number[] = [];
-    const batch = this.db.batch();
-
-    for (const entry of entries) {
-      this.currentSequence++;
-      const sequence = this.currentSequence;
-      sequences.push(sequence);
-
-      const fullEntry: ChangeEntry = {
-        ...entry,
-        sequence,
-      };
-
-      batch.put(this.sequenceKey(sequence), JSON.stringify(fullEntry));
-    }
-
-    batch.put(ChangeJournal.META_KEY, JSON.stringify({
-      currentSequence: this.currentSequence,
-      nodeId: this.nodeId,
-    }));
-
-    await batch.write();
-
-    return sequences;
   }
 
   /**
@@ -297,9 +310,13 @@ export class ChangeJournal {
     })) {
       if (key === ChangeJournal.META_KEY) continue;
 
-      const entry: ChangeEntry = JSON.parse(value);
-      if (entry.entityId === entityId) {
-        entries.push(entry);
+      try {
+        const entry: ChangeEntry = JSON.parse(value);
+        if (entry.entityId === entityId) {
+          entries.push(entry);
+        }
+      } catch (parseError) {
+        console.error(`Corrupted journal entry at ${key}:`, parseError);
       }
     }
 
@@ -318,9 +335,13 @@ export class ChangeJournal {
     })) {
       if (key === ChangeJournal.META_KEY) continue;
 
-      const entry: ChangeEntry = JSON.parse(value);
-      if (entry.type === type) {
-        entries.push(entry);
+      try {
+        const entry: ChangeEntry = JSON.parse(value);
+        if (entry.type === type) {
+          entries.push(entry);
+        }
+      } catch (parseError) {
+        console.error(`Corrupted journal entry at ${key}:`, parseError);
       }
     }
 
@@ -402,16 +423,20 @@ export class ChangeJournal {
     })) {
       if (key === ChangeJournal.META_KEY) continue;
 
-      const entry: ChangeEntry = JSON.parse(value);
-      stats.totalEntries++;
+      try {
+        const entry: ChangeEntry = JSON.parse(value);
+        stats.totalEntries++;
 
-      if (first || entry.sequence < stats.oldestSequence) {
-        stats.oldestSequence = entry.sequence;
-        first = false;
+        if (first || entry.sequence < stats.oldestSequence) {
+          stats.oldestSequence = entry.sequence;
+          first = false;
+        }
+
+        stats.byType[entry.type] = (stats.byType[entry.type] ?? 0) + 1;
+        stats.byOperation[entry.operation] = (stats.byOperation[entry.operation] ?? 0) + 1;
+      } catch (parseError) {
+        console.error(`Corrupted journal entry at ${key}:`, parseError);
       }
-
-      stats.byType[entry.type] = (stats.byType[entry.type] ?? 0) + 1;
-      stats.byOperation[entry.operation] = (stats.byOperation[entry.operation] ?? 0) + 1;
     }
 
     return stats;

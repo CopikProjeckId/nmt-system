@@ -38,7 +38,10 @@ export async function cmdInfer(
           return { success: false, error: `Neuron not found: ${neuronId}` };
         }
 
-        const results = await ctx.inferenceEngine.forwardInfer(neuron);
+        const results = await ctx.inferenceEngine.infer(neuron, {
+          direction: 'forward',
+          maxDepth: depth,
+        });
 
         return {
           success: true,
@@ -69,7 +72,10 @@ export async function cmdInfer(
           return { success: false, error: `Neuron not found: ${neuronId}` };
         }
 
-        const results = await ctx.inferenceEngine.backwardInfer(neuron);
+        const results = await ctx.inferenceEngine.infer(neuron, {
+          direction: 'backward',
+          maxDepth: depth,
+        });
 
         return {
           success: true,

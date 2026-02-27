@@ -91,6 +91,50 @@ export interface ChunkOptions {
 // Neuron Types
 // ============================================================================
 
+/** Column schema for DB source round-trip fidelity */
+export interface SourceColumnSchema {
+  name: string;
+  type: string;
+  nullable: boolean;
+  isPrimary: boolean;
+  isForeign?: boolean;
+  foreignTable?: string;
+  foreignColumn?: string;
+  defaultValue?: unknown;
+  autoIncrement?: boolean;
+  isUnique?: boolean;
+  maxLength?: number;
+  extra?: string;
+}
+
+/** Table-level FK constraint for round-trip fidelity */
+export interface SourceForeignKey {
+  column: string;
+  refTable: string;
+  refColumn: string;
+}
+
+/** Table-level index for round-trip fidelity */
+export interface SourceIndex {
+  name: string;
+  columns: string[];
+  unique: boolean;
+}
+
+/** CHECK constraint for round-trip fidelity */
+export interface SourceCheckConstraint {
+  name: string;
+  clause: string;
+}
+
+/** Table trigger for round-trip fidelity */
+export interface SourceTrigger {
+  name: string;
+  timing: 'BEFORE' | 'AFTER';
+  event: 'INSERT' | 'UPDATE' | 'DELETE';
+  body: string;
+}
+
 /** Metadata attached to a neuron */
 export interface NeuronMetadata {
   createdAt: string;
@@ -105,6 +149,16 @@ export interface NeuronMetadata {
   expiresAt?: number;            // Transient만: 만료 타임스탬프
   importance?: number;           // 중요도 점수 (0-1)
   verifiedAt?: string;           // 마지막 검증 시간
+  // DB Bridge round-trip fidelity
+  sourceRow?: Record<string, unknown>;       // 원본 행 데이터
+  sourceColumns?: SourceColumnSchema[];      // 원본 컬럼 스키마 (FK/DEFAULT/AI/UNI 포함)
+  sourceForeignKeys?: SourceForeignKey[];    // 테이블 레벨 FK 제약
+  sourceIndexes?: SourceIndex[];             // 테이블 레벨 인덱스/유니크 제약
+  sourceChecks?: SourceCheckConstraint[];    // CHECK 제약
+  sourceTriggers?: SourceTrigger[];          // 트리거
+  sourceTable?: string;                       // 원본 테이블명
+  sourceEngine?: string;                      // 원본 엔진 (InnoDB 등)
+  sourceCharset?: string;                     // 원본 문자셋 (utf8mb4 등)
 }
 
 /** Core neuron data structure */
@@ -255,6 +309,15 @@ export interface INeuronStore {
     merkleRoot: string;
     sourceType?: string;
     tags?: string[];
+    sourceRow?: Record<string, unknown>;
+    sourceColumns?: SourceColumnSchema[];
+    sourceForeignKeys?: SourceForeignKey[];
+    sourceIndexes?: SourceIndex[];
+    sourceChecks?: SourceCheckConstraint[];
+    sourceTriggers?: SourceTrigger[];
+    sourceTable?: string;
+    sourceEngine?: string;
+    sourceCharset?: string;
   }): Promise<NeuronNode>;
   putNeuron(neuron: NeuronNode): Promise<void>;
   getNeuron(id: UUID): Promise<NeuronNode | null>;
@@ -288,8 +351,8 @@ export interface INeuronStore {
 export interface IIndexStore {
   init(): Promise<void>;
   close(): Promise<void>;
-  save(name: string, index: any): Promise<void>;
-  load(name: string): Promise<any | null>;
+  save(name: string, index: HNSWIndexData): Promise<void>;
+  load(name: string): Promise<HNSWIndexData | null>;
   delete(name: string): Promise<boolean>;
   list(): Promise<string[]>;
 }

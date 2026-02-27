@@ -12,7 +12,12 @@ import type {
   TraversalStrategy,
   NeuronPath,
   SearchResult,
-  INeuronStore
+  INeuronStore,
+  SourceColumnSchema,
+  SourceForeignKey,
+  SourceIndex,
+  SourceCheckConstraint,
+  SourceTrigger,
 } from '../types/index.js';
 import { HNSWIndex } from './hnsw-index.js';
 import { cosineSimilarity } from '../utils/similarity.js';
@@ -38,6 +43,15 @@ export interface CreateNeuronInput {
   tags?: string[];
   autoConnect?: boolean;
   connectionThreshold?: number;
+  sourceRow?: Record<string, unknown>;
+  sourceColumns?: SourceColumnSchema[];
+  sourceForeignKeys?: SourceForeignKey[];
+  sourceIndexes?: SourceIndex[];
+  sourceChecks?: SourceCheckConstraint[];
+  sourceTriggers?: SourceTrigger[];
+  sourceTable?: string;
+  sourceEngine?: string;
+  sourceCharset?: string;
 }
 
 /**
@@ -76,7 +90,16 @@ export class NeuronGraphManager {
       chunkHashes: input.chunkHashes,
       merkleRoot: input.merkleRoot,
       sourceType: input.sourceType,
-      tags: input.tags
+      tags: input.tags,
+      sourceRow: input.sourceRow,
+      sourceColumns: input.sourceColumns,
+      sourceForeignKeys: input.sourceForeignKeys,
+      sourceIndexes: input.sourceIndexes,
+      sourceChecks: input.sourceChecks,
+      sourceTriggers: input.sourceTriggers,
+      sourceTable: input.sourceTable,
+      sourceEngine: input.sourceEngine,
+      sourceCharset: input.sourceCharset,
     });
 
     // Add to HNSW index

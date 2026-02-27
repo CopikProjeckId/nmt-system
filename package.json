@@ -1,6 +1,6 @@
 {
   "name": "@ninebix/nmt-system",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "Neuron Merkle Tree - Verifiable Semantic Knowledge Graph System",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -59,6 +59,10 @@
     "js-sha3": "^0.9.3",
     "level": "^8.0.1",
     "uuid": "^10.0.0"
+  },
+  "optionalDependencies": {
+    "mongodb": "^6.21.0",
+    "mysql2": "^3.18.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

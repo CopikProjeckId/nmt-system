@@ -344,16 +344,17 @@ export class FourStageLearningSystem extends EventEmitter {
 
     this.emit('session:end', session);
 
-    // Auto-persist if enabled
+    // Persist data before clearing to prevent data loss
     if (this.autoPersistEnabled) {
-      this.persistNow().catch(err => {
-        this.emit('error', { error: err as Error });
-      });
+      this.persistNow()
+        .catch((err) => { this.emit('error', { error: err as Error }); })
+        .finally(() => {
+          this.clearSessionData();
+          this.emit('memory:cleared', {});
+        });
+    } else {
+      this.clearSessionData();
     }
-
-    // Memory cleanup: clear session-specific data to prevent memory leaks
-    // This is important for long-running processes
-    this.clearSessionData();
 
     return session;
   }
@@ -1374,7 +1375,7 @@ export class FourStageLearningSystem extends EventEmitter {
       yield createProgress('outcomes', 0, 100, 'Finalizing...');
 
       // End session
-      this.endSession();
+      await this.endSession();
 
       yield createProgress('outcomes', 100, 100, 'Session complete');
 
@@ -1423,11 +1424,18 @@ export class FourStageLearningSystem extends EventEmitter {
       clearInterval(this.autoPersistInterval);
     }
 
-    // Start auto-persist interval
+    // Start auto-persist interval (skips tick if previous persist still running)
+    let persistInProgress = false;
     this.autoPersistInterval = setInterval(() => {
-      this.persistNow().catch(err => {
-        this.emit('error', { error: err as Error });
-      });
+      if (persistInProgress) return;
+      persistInProgress = true;
+      this.persistNow()
+        .catch(err => {
+          this.emit('error', { error: err as Error });
+        })
+        .finally(() => {
+          persistInProgress = false;
+        });
     }, intervalMs);
   }
 

@@ -13,9 +13,6 @@ import type { SHA3Hash } from '../types/index.js';
  * @returns 64-character hex hash string
  */
 export function hash(data: Buffer | string): SHA3Hash {
-  if (Buffer.isBuffer(data)) {
-    return sha3_256(data);
-  }
   return sha3_256(data);
 }
 
@@ -48,6 +45,9 @@ export function verifyHash(data: Buffer | string, expectedHash: SHA3Hash): boole
  * @returns SHA3-256 hash of JSON string
  */
 export function hashObject(obj: unknown): SHA3Hash {
+  if (obj === null || obj === undefined || typeof obj !== 'object') {
+    return hash(JSON.stringify(obj));
+  }
   const json = JSON.stringify(obj, Object.keys(obj as object).sort());
   return hash(json);
 }

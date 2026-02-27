@@ -355,11 +355,84 @@ export class TextEmbeddingService {
   }
 
   /**
-   * Batch API embedding
+   * Batch API embedding - sends texts in a single API request where possible
    */
   private async batchEmbedAPI(texts: string[]): Promise<EmbeddingResponse[]> {
-    // Simplified: process individually for now
-    // In production, batch API calls
+    if (texts.length === 0) return [];
+
+    // OpenAI supports batch embedding natively
+    if (this.config.type === 'openai' && this.config.apiKey) {
+      const response = await fetch(this.config.baseUrl ?? 'https://api.openai.com/v1/embeddings', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.config.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: this.config.modelId ?? 'text-embedding-3-small',
+          input: texts,
+          dimensions: this.embeddingDimension
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`OpenAI batch API error: ${response.statusText}`);
+      }
+
+      const data = await response.json() as {
+        data: Array<{ embedding: number[]; index: number }>;
+        usage: { total_tokens: number };
+      };
+
+      // Sort by index to maintain input order
+      const sorted = data.data.sort((a, b) => a.index - b.index);
+      const tokensPerItem = Math.ceil(data.usage.total_tokens / texts.length);
+
+      return sorted.map(item => ({
+        embedding: new Float32Array(item.embedding) as Embedding384,
+        provider: 'openai' as const,
+        model: this.config.modelId ?? 'text-embedding-3-small',
+        tokenCount: tokensPerItem
+      }));
+    }
+
+    // Cohere supports batch via `texts` array
+    if (this.config.type === 'cohere' && this.config.apiKey) {
+      const response = await fetch(this.config.baseUrl ?? 'https://api.cohere.ai/v1/embed', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.config.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: this.config.modelId ?? 'embed-english-v3.0',
+          texts,
+          input_type: 'search_document'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Cohere batch API error: ${response.statusText}`);
+      }
+
+      const data = await response.json() as {
+        embeddings: number[][];
+      };
+
+      return data.embeddings.map(emb => {
+        let embedding: Embedding384 = new Float32Array(emb) as Embedding384;
+        if (embedding.length !== this.embeddingDimension) {
+          embedding = this.resizeEmbedding(embedding, this.embeddingDimension) as Embedding384;
+        }
+        return {
+          embedding,
+          provider: 'cohere' as const,
+          model: this.config.modelId ?? 'embed-english-v3.0'
+        };
+      });
+    }
+
+    // Fallback: process individually for local/unknown providers
     return Promise.all(texts.map(text => this.embed({ text })));
   }
 

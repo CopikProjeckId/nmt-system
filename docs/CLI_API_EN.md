@@ -118,6 +118,32 @@ nmt orchestrate feedback <neuron-id> --score 0.8
 
 ---
 
+## DB Bridge REST API
+
+DB Bridge is accessed via REST API (not CLI commands).
+
+```bash
+# Connect to external database
+POST /api/v1/db/connect
+  { "driver": "mysql", "host": "localhost", "database": "mydb", "user": "root", "password": "pass" }
+
+# Get schema
+POST /api/v1/db/schema
+  { "table": "users" }
+
+# Import DB → NMT
+POST /api/v1/db/import
+  { "table": "users", "limit": 5000, "tags": ["project"], "autoConnect": true }
+
+# Export NMT → DB (with 100% source data restoration)
+POST /api/v1/db/export
+  { "tags": ["db-import", "users"], "restoreSourceData": true, "targetTable": "users_copy" }
+```
+
+Supported drivers: `mysql`, `mariadb`, `mongodb`
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Description |

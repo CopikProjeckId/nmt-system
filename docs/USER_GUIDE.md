@@ -13,9 +13,10 @@
 5. [상태 동기화](#5-상태-동기화)
 6. [검증 및 증명](#6-검증-및-증명)
 7. [대시보드 사용하기](#7-대시보드-사용하기)
-8. [실전 시나리오](#8-실전-시나리오)
-9. [문제 해결](#9-문제-해결)
-10. [용어 정리](#10-용어-정리)
+8. [DB Bridge — 외부 데이터베이스 연동](#8-db-bridge--외부-데이터베이스-연동)
+9. [실전 시나리오](#9-실전-시나리오)
+10. [문제 해결](#10-문제-해결)
+11. [용어 정리](#11-용어-정리)
 
 ---
 
@@ -416,7 +417,78 @@ npm run dev
 
 ---
 
-## 8. 실전 시나리오
+## 8. DB Bridge — 외부 데이터베이스 연동
+
+NMT의 DB Bridge를 사용하면 MySQL/MariaDB, MongoDB의 데이터를 NMT로 가져오고, NMT에 저장된 데이터를 원본 구조 그대로 외부 DB로 내보낼 수 있습니다.
+
+### 8.1 지원 데이터베이스
+
+| DB | 드라이버 | 필요 패키지 |
+|----|---------|------------|
+| MySQL | `mysql` | `npm install mysql2` |
+| MariaDB | `mariadb` | `npm install mysql2` |
+| MongoDB | `mongodb` | `npm install mongodb` |
+
+### 8.2 DB 연결
+
+```bash
+curl -X POST http://localhost:3000/api/v1/db/connect \
+  -H "Content-Type: application/json" \
+  -d '{
+    "driver": "mysql",
+    "host": "localhost",
+    "port": 3306,
+    "database": "mydb",
+    "user": "root",
+    "password": "pass"
+  }'
+```
+
+### 8.3 스키마 확인
+
+```bash
+curl -X POST http://localhost:3000/api/v1/db/schema \
+  -H "Content-Type: application/json" \
+  -d '{"table": "users"}'
+```
+
+### 8.4 DB → NMT 가져오기
+
+```bash
+curl -X POST http://localhost:3000/api/v1/db/import \
+  -H "Content-Type: application/json" \
+  -d '{
+    "table": "users",
+    "limit": 5000,
+    "tags": ["회원DB"],
+    "autoConnect": true
+  }'
+```
+
+각 행이 뉴런으로 변환되며, 원본 데이터(컬럼 값, DDL 구조)가 메타데이터에 보존됩니다.
+
+### 8.5 NMT → DB 내보내기
+
+```bash
+# 원본 데이터 100% 복원 모드
+curl -X POST http://localhost:3000/api/v1/db/export \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tags": ["db-import", "users"],
+    "restoreSourceData": true,
+    "targetTable": "users_restored"
+  }'
+```
+
+`restoreSourceData: true`를 사용하면 원본 컬럼 타입, FK, 인덱스, CHECK 제약, 트리거, 엔진 설정까지 100% 복원됩니다.
+
+### 8.6 대시보드에서 사용
+
+대시보드 → DB Bridge 탭에서 GUI로 연결, 가져오기, 내보내기를 수행할 수 있습니다. "Restore Source Data" 토글로 원본 복원 모드를 선택합니다.
+
+---
+
+## 9. 실전 시나리오
 
 ### 시나리오 1: 기술 문서 지식 베이스
 
@@ -464,7 +536,7 @@ nmt attractor path <current> <goal>
 
 ---
 
-## 9. 문제 해결
+## 10. 문제 해결
 
 ### "Neuron not found"
 
@@ -500,7 +572,7 @@ npm run dev
 
 ---
 
-## 10. 용어 정리
+## 11. 용어 정리
 
 | 용어 | 영어 | 설명 |
 |------|------|------|
@@ -514,6 +586,8 @@ npm run dev
 | 얽힘 | Entanglement | 두 뉴런의 상관관계 |
 | 벡터 클럭 | Vector Clock | 분산 환경 인과 관계 추적 |
 | HNSW | - | 고속 벡터 검색 알고리즘 |
+| DB Bridge | - | 외부 DB ↔ NMT 양방향 데이터 전송 서비스 |
+| Round-Trip | - | Import→Export 시 원본 데이터 100% 보존 |
 
 ---
 

@@ -557,6 +557,10 @@ export class AttractorModel {
     // Track edge costs for bottleneck analysis
     const edgeCosts = new Map<string, number>();
 
+    // Track depth per node to avoid repeated path reconstruction
+    const depthMap = new Map<UUID, number>();
+    depthMap.set(startId, 0);
+
     // Main A* loop
     while (!openSet.isEmpty() && result.nodesExplored < this.maxSearchNodes) {
       const current = openSet.dequeue()!;
@@ -588,8 +592,8 @@ export class AttractorModel {
       // Add to closed set
       closedSet.add(current.id);
 
-      // Check depth limit
-      const depth = this.reconstructPath(current.id, cameFrom).length - 1;
+      // Check depth limit using tracked depth
+      const depth = depthMap.get(current.id) ?? 0;
       if (depth >= maxDepth) continue;
 
       // Expand neighbors
@@ -628,6 +632,7 @@ export class AttractorModel {
           cameFrom.set(synapse.targetId, current.id);
           gScores.set(synapse.targetId, tentativeG);
           edgeCosts.set(`${current.id}:${synapse.targetId}`, adjustedCost);
+          depthMap.set(synapse.targetId, depth + 1);
 
           // Calculate heuristic
           const h = this.calculateHeuristic(neighborEmbedding, goal.embedding);
@@ -772,7 +777,9 @@ export class AttractorModel {
   }
 
   /**
-   * A* search with path exclusion for k-best paths
+   * A* search with path exclusion for k-best paths (Yen's algorithm variant)
+   *
+   * Penalizes edges used by excluded paths to force exploration of alternatives.
    */
   private async aStarSearchWithExclusion(
     startId: UUID,
@@ -780,13 +787,104 @@ export class AttractorModel {
     maxDepth: number,
     excludedPaths: Set<string>
   ): Promise<AStarResult> {
-    // Similar to aStarSearch but with path exclusion
-    const result = await this.aStarSearch(startId, goal, maxDepth);
+    // Build a set of excluded edges from previously found paths
+    const excludedEdges = new Set<string>();
+    for (const pathKey of excludedPaths) {
+      const nodes = pathKey.split(':');
+      for (let i = 0; i < nodes.length - 1; i++) {
+        excludedEdges.add(`${nodes[i]}:${nodes[i + 1]}`);
+      }
+    }
 
-    // If the found path is excluded, try again with penalty
-    if (result.found && excludedPaths.has(result.path.join(':'))) {
-      // Add penalty and retry - this is simplified
-      result.found = false;
+    // Run A* with edge penalties
+    const result: AStarResult = {
+      found: false, path: [], totalCost: Infinity,
+      nodesExplored: 0, pathProbability: 0, bottlenecks: []
+    };
+
+    const startEmbedding = this.embeddingCache.get(startId)
+      ?? (await this.store.getNeuron(startId))?.embedding;
+    if (!startEmbedding) return result;
+    this.embeddingCache.set(startId, startEmbedding);
+
+    const startH = this.calculateHeuristic(startEmbedding, goal.embedding);
+    const openSet = new PriorityQueue<AStarNode>();
+    openSet.enqueue({ id: startId, parent: null, g: 0, h: startH, f: this.heuristicWeight * startH });
+
+    const closedSet = new Set<UUID>();
+    const gScores = new Map<UUID, number>();
+    gScores.set(startId, 0);
+    const cameFrom = new Map<UUID, UUID>();
+    const edgeCosts = new Map<string, number>();
+
+    while (!openSet.isEmpty() && result.nodesExplored < this.maxSearchNodes) {
+      const current = openSet.dequeue()!;
+      result.nodesExplored++;
+
+      if (closedSet.has(current.id)) continue;
+
+      let currentEmbedding = this.embeddingCache.get(current.id);
+      if (!currentEmbedding) {
+        const node = await this.store.getNeuron(current.id);
+        if (!node) continue;
+        currentEmbedding = node.embedding;
+        this.embeddingCache.set(current.id, currentEmbedding);
+      }
+
+      const similarity = cosineSimilarity(currentEmbedding, goal.embedding);
+      if (similarity > 0.9) {
+        const candidatePath = this.reconstructPath(current.id, cameFrom);
+        const candidateKey = candidatePath.join(':');
+        // Reject if this exact path was already found
+        if (!excludedPaths.has(candidateKey)) {
+          result.found = true;
+          result.totalCost = current.g;
+          result.path = candidatePath;
+          result.pathProbability = this.calculatePathProbability(result.path, edgeCosts);
+          result.bottlenecks = this.identifyAStarBottlenecks(result.path, edgeCosts);
+          return result;
+        }
+      }
+
+      closedSet.add(current.id);
+
+      const depth = this.reconstructPath(current.id, cameFrom).length - 1;
+      if (depth >= maxDepth) continue;
+
+      const outgoing = await this.store.getOutgoingSynapses(current.id);
+      for (const synapse of outgoing) {
+        if (closedSet.has(synapse.targetId)) continue;
+
+        let neighborEmbedding = this.embeddingCache.get(synapse.targetId);
+        if (!neighborEmbedding) {
+          const neighborNode = await this.store.getNeuron(synapse.targetId);
+          if (!neighborNode) continue;
+          neighborEmbedding = neighborNode.embedding;
+          this.embeddingCache.set(synapse.targetId, neighborEmbedding);
+        }
+
+        let edgeCost = 1 - synapse.weight;
+        const currentToGoal = 1 - cosineSimilarity(currentEmbedding, goal.embedding);
+        const neighborToGoal = 1 - cosineSimilarity(neighborEmbedding, goal.embedding);
+        const attractorBonus = Math.max(0, currentToGoal - neighborToGoal) * 0.5;
+        edgeCost = Math.max(0.01, edgeCost - attractorBonus);
+
+        // Penalize excluded edges to force alternative paths
+        const edgeKey = `${current.id}:${synapse.targetId}`;
+        if (excludedEdges.has(edgeKey)) {
+          edgeCost += 2.0;
+        }
+
+        const tentativeG = current.g + edgeCost;
+        const existingG = gScores.get(synapse.targetId) ?? Infinity;
+        if (tentativeG < existingG) {
+          cameFrom.set(synapse.targetId, current.id);
+          gScores.set(synapse.targetId, tentativeG);
+          edgeCosts.set(edgeKey, edgeCost);
+          const h = this.calculateHeuristic(neighborEmbedding, goal.embedding);
+          openSet.enqueue({ id: synapse.targetId, parent: current.id, g: tentativeG, h, f: tentativeG + this.heuristicWeight * h });
+        }
+      }
     }
 
     return result;
@@ -795,7 +893,9 @@ export class AttractorModel {
   /**
    * Bidirectional A* search for faster pathfinding
    *
-   * Searches from both start and goal simultaneously
+   * Runs forward A* from start and backward BFS from the goal's nearest neurons,
+   * meeting in the middle for faster convergence on large graphs.
+   * Falls back to standard A* when no backward anchors can be identified.
    */
   async bidirectionalAStarSearch(
     startId: UUID,
@@ -807,9 +907,149 @@ export class AttractorModel {
       return { found: false, path: [], totalCost: Infinity, nodesExplored: 0, pathProbability: 0, bottlenecks: [] };
     }
 
-    // For now, delegate to standard A* (full bidirectional needs goal node ID)
-    // In a full implementation, you'd need to identify goal nodes first
-    return this.aStarSearch(startId, attractor, maxDepth);
+    // Identify goal-side anchor nodes: neurons highly similar to the attractor
+    const allNeuronIds = await this.store.getAllNeuronIds();
+    const goalAnchors: { id: UUID; similarity: number }[] = [];
+
+    for (const nid of allNeuronIds) {
+      let emb = this.embeddingCache.get(nid);
+      if (!emb) {
+        const n = await this.store.getNeuron(nid);
+        if (!n) continue;
+        emb = n.embedding;
+        this.embeddingCache.set(nid, emb);
+      }
+      const sim = cosineSimilarity(emb, attractor.embedding);
+      if (sim > 0.85) {
+        goalAnchors.push({ id: nid, similarity: sim });
+      }
+    }
+
+    // No anchors near the goal -- fall back to standard A*
+    if (goalAnchors.length === 0) {
+      return this.aStarSearch(startId, attractor, maxDepth);
+    }
+
+    // Build backward reachability from goal anchors (BFS up to maxDepth/2)
+    const backwardReach = new Map<UUID, UUID[]>(); // nodeId -> path to goal anchor
+    const backwardDepth = Math.max(2, Math.floor(maxDepth / 2));
+
+    for (const anchor of goalAnchors) {
+      const queue: { id: UUID; path: UUID[] }[] = [{ id: anchor.id, path: [anchor.id] }];
+      const visited = new Set<UUID>([anchor.id]);
+
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (current.path.length > backwardDepth) continue;
+
+        const incoming = await this.store.getIncomingSynapses(current.id);
+        for (const syn of incoming) {
+          if (visited.has(syn.sourceId)) continue;
+          visited.add(syn.sourceId);
+          const path = [syn.sourceId, ...current.path];
+          // Keep shortest path per node
+          if (!backwardReach.has(syn.sourceId) || backwardReach.get(syn.sourceId)!.length > path.length) {
+            backwardReach.set(syn.sourceId, path);
+          }
+          queue.push({ id: syn.sourceId, path });
+        }
+      }
+    }
+
+    // Forward A* from start, checking for meeting points with backward reach
+    const result: AStarResult = {
+      found: false, path: [], totalCost: Infinity,
+      nodesExplored: 0, pathProbability: 0, bottlenecks: []
+    };
+
+    const startNode = await this.store.getNeuron(startId);
+    if (!startNode) return this.aStarSearch(startId, attractor, maxDepth);
+    this.embeddingCache.set(startId, startNode.embedding);
+
+    const startH = this.calculateHeuristic(startNode.embedding, attractor.embedding);
+    const openSet = new PriorityQueue<AStarNode>();
+    openSet.enqueue({ id: startId, parent: null, g: 0, h: startH, f: this.heuristicWeight * startH });
+
+    const closedSet = new Set<UUID>();
+    const gScores = new Map<UUID, number>();
+    gScores.set(startId, 0);
+    const cameFrom = new Map<UUID, UUID>();
+    const edgeCosts = new Map<string, number>();
+
+    while (!openSet.isEmpty() && result.nodesExplored < this.maxSearchNodes) {
+      const current = openSet.dequeue()!;
+      result.nodesExplored++;
+
+      if (closedSet.has(current.id)) continue;
+
+      // Check if current node is a meeting point with backward reach
+      if (backwardReach.has(current.id)) {
+        const forwardPath = this.reconstructPath(current.id, cameFrom);
+        const backwardPath = backwardReach.get(current.id)!;
+        // Stitch: forward path + backward path (skip duplicate meeting node)
+        result.found = true;
+        result.path = [...forwardPath, ...backwardPath.slice(1)];
+        result.totalCost = current.g;
+        result.pathProbability = this.calculatePathProbability(result.path, edgeCosts);
+        result.bottlenecks = this.identifyAStarBottlenecks(result.path, edgeCosts);
+        return result;
+      }
+
+      // Standard A* goal check (similarity > 0.9)
+      let currentEmbedding = this.embeddingCache.get(current.id);
+      if (!currentEmbedding) {
+        const node = await this.store.getNeuron(current.id);
+        if (!node) continue;
+        currentEmbedding = node.embedding;
+        this.embeddingCache.set(current.id, currentEmbedding);
+      }
+
+      const similarity = cosineSimilarity(currentEmbedding, attractor.embedding);
+      if (similarity > 0.9) {
+        result.found = true;
+        result.totalCost = current.g;
+        result.path = this.reconstructPath(current.id, cameFrom);
+        result.pathProbability = this.calculatePathProbability(result.path, edgeCosts);
+        result.bottlenecks = this.identifyAStarBottlenecks(result.path, edgeCosts);
+        return result;
+      }
+
+      closedSet.add(current.id);
+
+      const depth = this.reconstructPath(current.id, cameFrom).length - 1;
+      if (depth >= maxDepth) continue;
+
+      const outgoing = await this.store.getOutgoingSynapses(current.id);
+      for (const synapse of outgoing) {
+        if (closedSet.has(synapse.targetId)) continue;
+
+        let neighborEmbedding = this.embeddingCache.get(synapse.targetId);
+        if (!neighborEmbedding) {
+          const neighborNode = await this.store.getNeuron(synapse.targetId);
+          if (!neighborNode) continue;
+          neighborEmbedding = neighborNode.embedding;
+          this.embeddingCache.set(synapse.targetId, neighborEmbedding);
+        }
+
+        const edgeCost = 1 - synapse.weight;
+        const currentToGoal = 1 - cosineSimilarity(currentEmbedding, attractor.embedding);
+        const neighborToGoal = 1 - cosineSimilarity(neighborEmbedding, attractor.embedding);
+        const attractorBonus = Math.max(0, currentToGoal - neighborToGoal) * 0.5;
+        const adjustedCost = Math.max(0.01, edgeCost - attractorBonus);
+
+        const tentativeG = current.g + adjustedCost;
+        const existingG = gScores.get(synapse.targetId) ?? Infinity;
+        if (tentativeG < existingG) {
+          cameFrom.set(synapse.targetId, current.id);
+          gScores.set(synapse.targetId, tentativeG);
+          edgeCosts.set(`${current.id}:${synapse.targetId}`, adjustedCost);
+          const h = this.calculateHeuristic(neighborEmbedding, attractor.embedding);
+          openSet.enqueue({ id: synapse.targetId, parent: current.id, g: tentativeG, h, f: tentativeG + this.heuristicWeight * h });
+        }
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -1023,11 +1263,40 @@ export class AttractorModel {
   // ==================== Private Methods ====================
 
   private updateProbabilityField(attractor: Attractor): void {
+    const gradient = new Map<UUID, number>();
+    const reachableStates: UUID[] = [];
+    const pathProbabilities: PathProbability[] = [];
+
+    // Compute gradient: similarity-based influence for cached embeddings
+    for (const [neuronId, embedding] of this.embeddingCache.entries()) {
+      const similarity = cosineSimilarity(embedding, attractor.embedding);
+      const influence = similarity * attractor.strength;
+      if (influence > 0.05) {
+        gradient.set(neuronId, influence);
+        reachableStates.push(neuronId);
+      }
+    }
+
+    // Compute path probabilities from recorded transitions
+    for (const transition of this.transitions) {
+      if (transition.attractorInfluence) {
+        const influence = transition.attractorInfluence.get(attractor.id);
+        if (influence && influence > 0.1) {
+          pathProbabilities.push({
+            path: [transition.from, transition.to],
+            probability: influence,
+            estimatedSteps: 1,
+            bottlenecks: [],
+          });
+        }
+      }
+    }
+
     const field: ProbabilityField = {
       attractor,
-      gradient: new Map(),
-      reachableStates: [],
-      pathProbabilities: []
+      gradient,
+      reachableStates,
+      pathProbabilities,
     };
 
     this.fields.set(attractor.id, field);

@@ -12,6 +12,7 @@ CLI 명령어와 검증 스키마에 대한 상세 문서입니다.
 6. [Attractor Commands](#attractor-commands)
 7. [Verify Commands](#verify-commands)
 8. [System Commands](#system-commands)
+9. [DB Bridge REST API](#db-bridge-rest-api)
 
 ---
 
@@ -565,6 +566,67 @@ nmt verify range <neuron-id> --start N --end M
 
 ---
 
+## DB Bridge REST API
+
+DB Bridge는 CLI가 아닌 REST API로 제공됩니다.
+
+### `POST /api/v1/db/connect`
+
+외부 데이터베이스 연결
+
+**Body:**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| driver | string | ✓ | `mysql`, `mariadb`, `mongodb` |
+| host | string | | 호스트 (기본: localhost) |
+| port | number | | 포트 |
+| database | string | ✓ | 데이터베이스명 |
+| user | string | | 사용자명 |
+| password | string | | 비밀번호 |
+| uri | string | | MongoDB URI (직접 지정) |
+
+---
+
+### `POST /api/v1/db/schema`
+
+테이블/컬렉션 스키마 조회
+
+**Body:**
+| 파라미터 | 타입 | 필수 | 설명 |
+|---------|------|------|------|
+| table | string | | 특정 테이블 (생략 시 전체) |
+
+---
+
+### `POST /api/v1/db/import`
+
+DB → NMT 가져오기
+
+**Body:**
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|------|-------|------|
+| table | string | ✓ | - | 소스 테이블명 |
+| limit | number | | - | 최대 행 수 |
+| offset | number | | 0 | 시작 오프셋 |
+| tags | string[] | | [] | 추가 태그 |
+| autoConnect | boolean | | true | 자동 시냅스 생성 |
+
+---
+
+### `POST /api/v1/db/export`
+
+NMT → DB 내보내기
+
+**Body:**
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|---------|------|------|-------|------|
+| tags | string[] | | [] | 내보낼 뉴런 태그 필터 |
+| targetTable | string | | - | 대상 테이블명 |
+| limit | number | | - | 최대 뉴런 수 |
+| restoreSourceData | boolean | | false | 원본 데이터 100% 복원 모드 |
+
+---
+
 ## 검증 오류
 
 검증 실패 시 다음 형식으로 오류가 반환됩니다:
@@ -588,4 +650,4 @@ Validation Error:
 
 ---
 
-*마지막 업데이트: 2025년 2월*
+*마지막 업데이트: 2026년 2월*

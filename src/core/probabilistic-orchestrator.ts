@@ -907,25 +907,30 @@ export class ProbabilisticOrchestrator {
     dimensions: { total: number; expanded: number };
     persistence: { enabled: boolean; lastSave?: string };
   } {
+    const attractorStats = this.attractors?.getStats();
+    const learningStats = this.learning?.getStats();
+    const neuronStats = this.neurons?.getStats();
+    const dimensionStats = this.dimensions?.getStats();
+
     return {
       inference: {
         available: !!this.inference,
       },
-      attractors: this.attractors ? {
-        count: this.attractors.getStats().totalAttractors,
-        active: this.attractors.getStats().activeAttractors,
+      attractors: attractorStats ? {
+        count: attractorStats.totalAttractors,
+        active: attractorStats.activeAttractors,
       } : { count: 0, active: 0 },
-      learning: this.learning ? {
-        patterns: this.learning.getStats().patterns,
-        processes: this.learning.getStats().processes,
+      learning: learningStats ? {
+        patterns: learningStats.patterns,
+        processes: learningStats.processes,
       } : { patterns: 0, processes: 0 },
-      neurons: this.neurons ? {
-        count: this.neurons.getStats().totalNeurons,
-        avgEntropy: this.neurons.getStats().averageEntropy,
+      neurons: neuronStats ? {
+        count: neuronStats.totalNeurons,
+        avgEntropy: neuronStats.averageEntropy,
       } : { count: 0, avgEntropy: 0 },
-      dimensions: this.dimensions ? {
-        total: this.dimensions.getStats().totalDimensions,
-        expanded: this.dimensions.getStats().expandedDimensions,
+      dimensions: dimensionStats ? {
+        total: dimensionStats.totalDimensions,
+        expanded: dimensionStats.expandedDimensions,
       } : { total: 384, expanded: 0 },
       persistence: {
         enabled: !!this.probabilisticStore,
@@ -997,7 +1002,7 @@ export class ProbabilisticOrchestrator {
       try {
         await this.saveState();
       } catch (error) {
-        console.error('[Orchestrator] Auto-save failed:', error);
+        logger.error('Auto-save failed:', { error: error instanceof Error ? error.message : String(error) });
       }
     }, this.config.autoSaveInterval);
   }
