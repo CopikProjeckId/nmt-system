@@ -62,24 +62,31 @@ Website : https://9bix.com
 
 ## 📊 Benchmarks
 
-> Tested on: Intel i7-12700K, 32GB RAM, NVMe SSD, Node.js 20
+> Measured on: AMD Ryzen 7, 16GB RAM, NVMe SSD, Node.js 20
+> Source: `tests/benchmark/realistic-performance.test.ts` (real LevelDB, deterministic embeddings, no Xenova)
 
-### Search Performance (HNSW)
+### HNSW Search Latency
 
-| Dataset Size | Search Latency (p50) | Search Latency (p99) | Recall@10 |
-|--------------|---------------------|---------------------|-----------|
-| 1,000 neurons | 0.8ms | 2.1ms | 98.5% |
-| 10,000 neurons | 2.3ms | 5.8ms | 97.2% |
-| 100,000 neurons | 8.7ms | 18.4ms | 95.8% |
+| Dataset Size | p50 | p95 | Notes |
+|--------------|-----|-----|-------|
+| 100 neurons | 0.10ms | 0.13ms | measured |
+| 1,000 neurons | 0.32ms | 0.35ms | measured |
+| 10,000 neurons | ~1.5ms | ~3ms | estimated (HNSW O(log n)) |
 
 ### Core Operations
 
-| Operation | Latency | Throughput |
-|-----------|---------|------------|
-| Ingest (500 chars) | 45ms | 22 ops/sec |
-| Search (top-10) | 3ms | 333 ops/sec |
-| Merkle Verify | 0.3ms | 3,333 ops/sec |
-| Connect Neurons | 1.2ms | 833 ops/sec |
+| Operation | p50 | p95 | Notes |
+|-----------|-----|-----|-------|
+| LevelDB write | 0.21ms | 0.61ms | measured |
+| LevelDB read | 0.05ms | 0.12ms | measured |
+| Ingest (no embedding) | 1.8ms | 3.2ms | measured — storage + graph only |
+| Ingest (with Xenova) | ~82ms | ~153ms | estimated — includes model inference |
+| Batch ingest ×10 (parallelChunk) | ~807ms total | — | ~12 docs/sec |
+| Soft-delete (HNSW tombstone) | 0.0002ms/op | — | O(1), measured |
+| Compact 100 tombstones | 0.38ms | — | measured |
+| LevelDB compactRange | ~48ms | — | measured — SST remerge |
+
+> **Sustained throughput with Xenova**: ~36,000 docs/hour at 80ms/embed average
 
 ### Memory Usage
 
@@ -92,12 +99,12 @@ Website : https://9bix.com
 ### vs. Alternatives
 
 ```
-Semantic Search Latency (10K documents, p50):
+Semantic Search Latency (1K neurons, p50):
 ────────────────────────────────────────────────
-NMT (local)      ████████ 2.3ms
-Chroma (local)   █████████ 2.8ms
-Pinecone (API)   ██████████████████████████████ 45ms
-Weaviate (API)   ████████████████████████████ 38ms
+NMT (local)      ██ 0.32ms
+Chroma (local)   ████████ ~2ms
+Pinecone (API)   ██████████████████████████████ ~45ms
+Weaviate (API)   ████████████████████████████ ~38ms
 
 Note: API-based solutions include network latency
 ```
@@ -344,10 +351,11 @@ If you're an AI using NMT, you can help improve it:
 2024 Q4  ✅ Core Engine (Merkle, HNSW, Graph)
 2025 Q1  ✅ MCP Integration for Claude Code
 2025 Q1  ✅ Probabilistic Ontology
-2025 Q2  🔄 MTEB Benchmark Suite
-2025 Q2  🔄 Multi-model Embedding Support
-2025 Q3  📋 Distributed Sync (P2P)
-2025 Q4  📋 Memory Compression & Aging
+2026 Q1  ✅ Production hardening (SerialQueue, soft-delete, compaction, crash recovery)
+2026 Q2  🔄 MTEB Benchmark Suite
+2026 Q2  🔄 Multi-model Embedding Support
+2026 Q3  📋 Distributed Sync (P2P)
+2026 Q4  📋 Memory Compression & Aging
 ```
 
 ---

@@ -289,7 +289,16 @@ interface HNSWParams {
 **복잡도**:
 - 삽입: O(log n)
 - 검색: O(log n)
+- 삭제 (soft): O(1) — tombstone Set에 추가, 구조 변경 없음
+- 삭제 (compact): O(k) — k개 tombstone 노드 일괄 물리 제거
 - 메모리: O(n * M)
+
+**Soft-Delete 전략**:
+- `delete(id)`: O(1) tombstone 마킹. 그래프 구조 유지, 검색/열거 시 필터링
+- `forceDelete(id)`: 즉시 구조 제거. `updateNeuronEmbedding` 내부 전용
+- `compact()`: 누적된 tombstone을 일괄 물리 제거. `CompactionScheduler`가 호출
+- `tombstoneCount`: 현재 대기 중인 tombstone 수 (compact 트리거 기준)
+- tombstone 50개 초과 시 또는 5분 경과 시 자동 compact 실행
 
 ---
 
@@ -668,12 +677,29 @@ interface ChangeEntry {
 - **M=16**: 연결 수 (정확도 vs 메모리 트레이드오프)
 - **efConstruction=200**: 구축 품질
 - **efSearch=50**: 검색 속도 vs 정확도
+- **Soft-delete**: O(1) tombstone으로 즉각 삭제 응답, 구조 재계산 없음
+- **CompactionScheduler**: tombstone 50개 초과 또는 5분 경과 시 백그라운드 compact
+
+### Concurrency — SerialTaskQueue
+
+LevelDB synapse 레코드는 read-modify-write 패턴이므로 동시 실행 시 lost update 발생.
+`SerialTaskQueue`가 Hebbian learning 3개 작업(reinforceCoActivation, inhibitCoActivation, encodeEpisode)을 직렬화.
+- fire-and-forget: 에러 시 `servicesLogger.warn`, 큐 풀(>100) 시 드롭 + 로깅
+- pending/dropped 카운터로 모니터링 가능
+
+### Batch Parallelization — parallelChunk
+
+순차 for-loop 대신 청크 단위 병렬 실행으로 처리량 향상:
+- `embedBatch`: concurrency=3 (Xenova CPU-bound 단일 파이프라인)
+- `ingestBatch`: concurrency=5 (독립 key → LevelDB 충돌 없음)
+- 결과 순서 보장 (Promise.all per chunk)
 
 ### LevelDB Tuning
 
 - Iterator 기반 범위 조회
 - 배치 쓰기로 트랜잭션 처리
-- 캐시 크기 최적화
+- `compactRange('\x00', '\xff')`: 삭제 후 SST 파일 재병합, 디스크 공간 회수
+- `CompactionScheduler`가 HNSW compact + LevelDB compactRange를 함께 실행
 
 ### Event System
 
@@ -686,6 +712,11 @@ interface ChangeEntry {
 - Float32Array로 임베딩 저장 (Float64 대비 50% 절감)
 - Map 대신 Object 사용 (직렬화 용이)
 - dispose() 패턴으로 명시적 정리
+
+### Crash Recovery
+
+3개 진입점(bin/nmt.ts, cli-server.ts, mcp/server.ts) 모두 `uncaughtException` + `unhandledRejection` 핸들러 등록.
+프로세스 비정상 종료 시 DB close → HNSW index 저장 시도 후 종료.
 
 ---
 
