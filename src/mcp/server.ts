@@ -20,54 +20,49 @@ import {
 // NMT System Instructions for AI Agents
 // ============================================================
 const NMT_SYSTEM_INSTRUCTIONS = `
-# NMT (Neuron Merkle Tree) - Verifiable Semantic Memory System
+# NMT (Neuron Merkle Tree) - Persistent Semantic Memory
 
-You have access to NMT, a persistent semantic memory system that stores and retrieves information using neural embeddings and cryptographic verification.
+## ⚡ MANDATORY: Session Start Protocol
 
-## When to Use NMT
+**AT THE VERY BEGINNING OF EVERY CONVERSATION, before anything else:**
+1. Call nmt_session_start — loads stored memory context automatically
+2. Read the returned context block and use it to inform your responses
 
-**USE NMT when:**
-- User wants to remember something for future sessions ("remember this", "save this for later")
-- You learn important information about the user (preferences, context, decisions)
-- User shares documents, code snippets, or knowledge worth preserving
-- You need to recall past conversations or stored knowledge
-- User asks "do you remember..." or "what did I tell you about..."
+This is non-negotiable. Without this step, you are operating without memory.
 
-**DON'T USE NMT for:**
-- Temporary information only needed in current conversation
-- Sensitive data (passwords, secrets, API keys)
-- Very short or trivial information
+## When to Save (nmt_save)
 
-## Tool Usage Patterns
+- User shares preferences, decisions, or project context worth keeping
+- You learn something important about the user's workflow, codebase, or goals
+- A significant architectural or design decision is made
+- User explicitly says "remember this" / "save this"
 
-### Pattern 1: Save Important Information
-When user shares valuable information:
-1. Use \`nmt_save\` with appropriate tags
-2. Confirm storage with the returned neuronId
+Do NOT save: passwords, API keys, temporary info, trivial one-off facts.
 
-### Pattern 2: Recall Past Knowledge
-When user asks about past information:
-1. Use \`nmt_search\` with semantic query (not exact keywords)
-2. Review results and synthesize relevant information
-3. If needed, use \`nmt_get\` for full content of specific neurons
+## When to Search (nmt_search)
 
-### Pattern 3: Build Knowledge Connections
-When information relates to existing knowledge:
-1. Use \`nmt_search\` to find related neurons
-2. Use \`nmt_connect\` to create semantic/causal links
-3. This helps future retrieval through association
+- Before answering questions about past context
+- When starting work on a familiar project (supplement nmt_session_start)
+- When session_start context seems incomplete for the current task
 
-### Pattern 3: Verify Data Integrity
-When accuracy is critical:
-1. Use \`nmt_verify\` to check if data was tampered
-2. Merkle tree verification ensures cryptographic integrity
+## Workflow Patterns
 
-## Best Practices
+Starting a session (MANDATORY):
+  nmt_session_start()  →  loads recent memory context
 
-1. **Tag wisely**: Use descriptive tags like ["user-preference", "coding-style"] or ["project-x", "architecture"]
-2. **Search semantically**: Query by meaning, not exact words. "coding habits" will find "programming preferences"
-3. **Connect related concepts**: Build a knowledge graph by linking neurons
-4. **Check stats periodically**: Use nmt_stats to monitor memory usage
+Saving new knowledge:
+  nmt_save(text="...", tags=["project-x", "architecture"])
+
+Focused recall:
+  nmt_search(query="authentication decisions for project-x")
+
+Building connections:
+  nmt_connect(sourceId, targetId, type="causal")
+
+## Tagging Convention
+- Project scope: ["project-x"]
+- Decision type: ["architecture", "preference", "bug-fix", "decision"]
+- Domain: ["auth", "ui", "db", "api"]
 `.trim();
 
 import { ChunkEngine } from '../core/chunk-engine.js';
@@ -81,6 +76,7 @@ import { IngestionService } from '../services/ingestion.js';
 import { QueryService } from '../services/query.js';
 import { VerificationService } from '../services/verify.js';
 import { ClusteringService } from '../extensions/clustering/index.js';
+import { ContextBuilder } from '../services/context-builder.js';
 
 /**
  * NMT MCP Server
@@ -101,6 +97,7 @@ export class NMTMCPServer {
   private queryService!: QueryService;
   private verifyService!: VerificationService;
   private clusteringService!: ClusteringService;
+  private contextBuilder!: ContextBuilder;
 
   private initialized = false;
 
@@ -182,6 +179,11 @@ export class NMTMCPServer {
 
     this.clusteringService = new ClusteringService(this.neuronStore);
 
+    this.contextBuilder = new ContextBuilder({
+      neuronStore: this.neuronStore,
+      chunkStore: this.chunkStore,
+    });
+
     this.initialized = true;
   }
 
@@ -242,6 +244,22 @@ export class NMTMCPServer {
     // List available tools with comprehensive descriptions
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
+        {
+          name: 'nmt_session_start',
+          description: `⚡ CALL THIS FIRST at the start of EVERY conversation.
+Loads your persistent memory context from NMT storage — recent decisions, preferences, and project knowledge.
+Returns a formatted context block. Read it and use it to inform all subsequent responses.
+No arguments needed. Fast (~5ms, no embedding required).`,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              recentN: {
+                type: 'number',
+                description: 'How many recent memories to include (default: 15)',
+              },
+            },
+          },
+        },
         {
           name: 'nmt_save',
           description: `Save text to persistent semantic memory. Use when:
@@ -404,6 +422,12 @@ Example: nmt_cluster(k=5) groups all neurons into 5 semantic clusters`,
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       resources: [
         {
+          uri: 'nmt://context',
+          name: 'NMT Memory Context',
+          description: 'Formatted memory context for session injection — recent and frequently accessed memories with content preview',
+          mimeType: 'text/plain',
+        },
+        {
           uri: 'nmt://stats',
           name: 'NMT Statistics',
           description: '현재 NMT 시스템 통계',
@@ -422,6 +446,19 @@ Example: nmt_cluster(k=5) groups all neurons into 5 semantic clusters`,
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
       await this.init();
       const uri = request.params.uri;
+
+      if (uri === 'nmt://context') {
+        const ctx = await this.contextBuilder.build({ recentN: 15, topN: 5 });
+        return {
+          contents: [
+            {
+              uri,
+              mimeType: 'text/plain',
+              text: ctx.text,
+            },
+          ],
+        };
+      }
 
       if (uri === 'nmt://stats') {
         const graphStats = await this.graphManager.getStats();
@@ -473,6 +510,19 @@ Example: nmt_cluster(k=5) groups all neurons into 5 semantic clusters`,
 
       try {
         switch (name) {
+          case 'nmt_session_start': {
+            const { recentN = 15 } = (args ?? {}) as { recentN?: number };
+            const ctx = await this.contextBuilder.build({ recentN, topN: 5 });
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: ctx.text,
+                },
+              ],
+            };
+          }
+
           case 'nmt_save': {
             const { text, tags } = args as { text: string; tags?: string[] };
             const neuron = await this.ingestionService.ingestText(text, {

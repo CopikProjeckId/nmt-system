@@ -959,6 +959,86 @@ async function cmdStats(config: Config) {
   }
 }
 
+// ============== Command: Context (Auto-inject) ==============
+
+/**
+ * nmt context [query]
+ *
+ * 인자 없음: 최근 15개 + 고빈도 5개 뉴런을 포맷해서 출력.
+ * 인자 있음: 시맨틱 검색 후 포맷 (Xenova 필요).
+ *
+ * 용도:
+ *   - 세션 시작 시 기억 미리보기
+ *   - CLAUDE.md 에 `nmt context` 결과를 파이프해서 컨텍스트 주입
+ *   - 스크립트에서 `nmt context --json` 으로 파싱
+ */
+async function cmdContext(args: string[], config: Config) {
+  const query = args[0];
+
+  if (query) {
+    // 시맨틱 검색 모드 (Xenova 필요)
+    const ctx = await bootstrap(config);
+    try {
+      const results = await ctx.queryService.search(query, { k: 15, includeContent: true });
+
+      if (config.json) {
+        log('', config, { query, count: results.length, results: results.map((r: any) => ({
+          id: r.neuron.id,
+          score: r.score,
+          tags: r.neuron.metadata.tags,
+          content: r.content,
+        }))});
+      } else {
+        console.log(`# NMT Memory — Search: "${query}"\n`);
+        if (results.length === 0) {
+          console.log('No matching memories found.');
+        } else {
+          for (const r of results) {
+            const tags = r.neuron.metadata.tags.map((t: string) => `#${t}`).join(' ');
+            const date = r.neuron.metadata.createdAt.slice(0, 10);
+            console.log(`---`);
+            console.log(`**[${date}]** score=${r.score.toFixed(3)} ${tags}`);
+            console.log(r.content ?? '');
+          }
+          console.log('---');
+        }
+      }
+      await shutdown();
+    } catch (error: any) {
+      await shutdown();
+      console.error('Context search failed:', error.message);
+      process.exit(1);
+    }
+  } else {
+    // 최근 기억 모드 (Xenova 불필요 — 빠름)
+    const { ContextBuilder } = await import('../src/services/context-builder.js');
+
+    // bootstrap 없이 store만 직접 열기
+    const { ChunkStore } = await import('../src/storage/chunk-store.js');
+    const { NeuronStore } = await import('../src/storage/neuron-store.js');
+
+    const neuronStore = new NeuronStore({ dataDir: config.dataDir });
+    const chunkStore  = new ChunkStore({ dataDir: config.dataDir });
+
+    try {
+      await neuronStore.init();
+      await chunkStore.init();
+
+      const builder = new ContextBuilder({ neuronStore, chunkStore });
+      const ctx     = await builder.build({ recentN: 15, topN: 5 });
+
+      if (config.json) {
+        log('', config, { neuronCount: ctx.neuronCount, included: ctx.included, context: ctx.text });
+      } else {
+        console.log(ctx.text);
+      }
+    } finally {
+      try { await neuronStore.close(); } catch { /* ignore */ }
+      try { await chunkStore.close(); } catch { /* ignore */ }
+    }
+  }
+}
+
 // ============== Commands: Graph Management ==============
 
 async function cmdFeedback(args: string[], config: Config) {
@@ -1758,6 +1838,10 @@ async function main() {
     // MCP Server (Claude Code Integration)
     case 'mcp':
       await cmdMcp(config);
+      break;
+
+    case 'context':
+      await cmdContext(args, config);
       break;
 
     case 'help':
