@@ -344,6 +344,11 @@ async function bootstrap(config: Config): Promise<NMTContext> {
 
 async function shutdown(): Promise<void> {
   if (!_ctx) return;
+
+  // Drain pending Hebbian learning tasks before closing DB
+  // Without this, SerialTaskQueue fires after DB close → "Database is not open" errors
+  try { await _ctx.queryService?.flushLearning?.(); } catch { /* ignore */ }
+
   // Save HNSW index — failure means new neurons won't persist
   try {
     await _ctx.indexStore.save('main', _ctx.hnswIndex);

@@ -240,13 +240,24 @@ export class QueryService {
 
     // ── Step 0: Pattern Completion (Hopfield iteration) ───────────────────────
     // Refines the query embedding toward the nearest memory cluster.
-    // Skipped when the index is empty (no neurons to converge toward).
-    const { refined: refinedEmbedding } = await this.graphManager.patternComplete(
-      embedding,
-      k * 2,   // candidates per iteration
-      3,       // iterations
-      0.3      // alpha: retain 30% of original query, pull 70% toward memories
-    );
+    //
+    // 활성화 조건: 뉴런 수 >= 20
+    // - 뉴런이 적으면 centroid가 전체 데이터를 대표하지 못함.
+    //   alpha=0.3 → 3회 반복 시 쿼리가 전체 평균으로 70%+ 수렴 → 검색 파괴.
+    // - 20개 미만일 땐 원본 임베딩을 그대로 사용한다.
+    const HOPFIELD_MIN_NEURONS = 20;
+    const usePatternCompletion = this.graphManager.indexSize >= HOPFIELD_MIN_NEURONS;
+
+    let refinedEmbedding = embedding;
+    if (usePatternCompletion) {
+      const result = await this.graphManager.patternComplete(
+        embedding,
+        k * 2,   // candidates per iteration
+        3,       // iterations
+        0.3      // alpha: retain 30% of original query, pull 70% toward memories
+      );
+      refinedEmbedding = result.refined;
+    }
 
     // Retrieve candidates for reranking
     const candidateCount = k * 2;
@@ -384,6 +395,14 @@ export class QueryService {
     }
 
     return results;
+  }
+
+  /**
+   * CLI shutdown 전에 호출 — 비동기 학습 큐(Hebbian reinforce 등)가
+   * DB 닫힌 후 실행되지 않도록 완료될 때까지 대기.
+   */
+  async flushLearning(): Promise<void> {
+    await this.learningQueue.flush();
   }
 
   /**

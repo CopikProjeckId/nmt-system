@@ -381,6 +381,11 @@ export class NeuronGraphManager {
   /**
    * Get graph statistics
    */
+  /** 현재 HNSW 인덱스의 유효 노드 수 (tombstone 제외) */
+  get indexSize(): number {
+    return this.index.size;
+  }
+
   async getStats(): Promise<{
     neuronCount: number;
     synapseCount: number;
