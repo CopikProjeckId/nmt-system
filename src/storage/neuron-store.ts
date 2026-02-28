@@ -59,6 +59,8 @@ interface SerializedNeuron {
     sourceCharset?: string;
     sourcePath?: string;
     sourceName?: string;
+    feedbackCount?: number;
+    embeddingDrift?: number;
   };
   outgoingSynapses: UUID[];
   incomingSynapses: UUID[];
@@ -121,6 +123,26 @@ export class NeuronStore {
     await this.neuronDb.close();
     await this.synapseDb.close();
     this.initialized = false;
+  }
+
+  /**
+   * Trigger LevelDB compaction to reclaim disk space after bulk deletes.
+   * Scans the full key range so LevelDB merges SST files and removes tombstones.
+   */
+  async compact(): Promise<void> {
+    if (!this.initialized) return;
+    const db = this.neuronDb as any;
+    const sdb = this.synapseDb as any;
+    if (typeof db.compactRange === 'function') {
+      await new Promise<void>((res, rej) =>
+        db.compactRange('\x00', '\xff', {}, (err: Error | null) => err ? rej(err) : res())
+      );
+    }
+    if (typeof sdb.compactRange === 'function') {
+      await new Promise<void>((res, rej) =>
+        sdb.compactRange('\x00', '\xff', {}, (err: Error | null) => err ? rej(err) : res())
+      );
+    }
   }
 
   // ==================== Neuron Operations ====================

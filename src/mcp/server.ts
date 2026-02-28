@@ -139,9 +139,16 @@ export class NMTMCPServer {
     this.neuronStore = new NeuronStore({ dataDir: this.dataDir });
     this.indexStore = new IndexStore({ dataDir: this.dataDir });
 
-    await this.chunkStore.init();
-    await this.neuronStore.init();
-    await this.indexStore.init();
+    try {
+      await this.chunkStore.init();
+      await this.neuronStore.init();
+      await this.indexStore.init();
+    } catch (err: any) {
+      throw new Error(
+        `Failed to open database at "${this.dataDir}": ${err.message}\n` +
+        `  Run "nmt init" to initialize the data directory first.`
+      );
+    }
 
     const existingIndex = await this.indexStore.load('main');
     if (existingIndex) {
@@ -675,10 +682,10 @@ Example: nmt_cluster(k=5) groups all neurons into 5 semantic clusters`,
    * Close the server
    */
   async close(): Promise<void> {
-    await this.indexStore.save('main', this.hnswIndex);
-    await this.chunkStore.close();
-    await this.neuronStore.close();
-    await this.indexStore.close();
+    try { await this.indexStore.save('main', this.hnswIndex); } catch { /* ignore */ }
+    try { await this.chunkStore.close(); } catch { /* ignore */ }
+    try { await this.neuronStore.close(); } catch { /* ignore */ }
+    try { await this.indexStore.close(); } catch { /* ignore */ }
   }
 }
 
@@ -696,14 +703,27 @@ if (isMainModule) {
     process.exit(1);
   });
 
-  // Handle shutdown
-  process.on('SIGINT', async () => {
+  // Handle shutdown signals
+  const gracefulShutdown = async (signal: string) => {
+    console.error(`\n[nmt-mcp] ${signal} received, closing...`);
     await server.close();
     process.exit(0);
+  };
+
+  process.on('SIGINT',  () => void gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+
+  // Guard against uncaught errors — always clean up DB before exit
+  process.on('uncaughtException', async (err) => {
+    console.error('[nmt-mcp] Fatal error:', err.message);
+    await server.close();
+    process.exit(1);
   });
 
-  process.on('SIGTERM', async () => {
+  process.on('unhandledRejection', async (reason) => {
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    console.error('[nmt-mcp] Unhandled async error:', msg);
     await server.close();
-    process.exit(0);
+    process.exit(1);
   });
 }

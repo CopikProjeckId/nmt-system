@@ -34,7 +34,8 @@ export type SynapseType =
   | 'CAUSAL'
   | 'ASSOCIATIVE'
   | 'HIERARCHICAL'
-  | 'DUPLICATE';
+  | 'DUPLICATE'
+  | 'INHIBITORY';  // Competitive inhibition: winner suppresses similar loser
 
 /**
  * Neuron Type - Fact vs Transient classification
@@ -162,6 +163,9 @@ export interface NeuronMetadata {
   // File ingestion provenance
   sourcePath?: string;                         // 원본 파일 절대 경로
   sourceName?: string;                         // 원본 파일명 (basename)
+  // Online embedding learning
+  feedbackCount?: number;                      // 누적 피드백 횟수
+  embeddingDrift?: number;                     // 원본 임베딩에서 이동한 거리 (0-2)
 }
 
 /** Core neuron data structure */

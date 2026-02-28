@@ -20,7 +20,7 @@ import type {
   SourceTrigger,
 } from '../types/index.js';
 import { HNSWIndex } from './hnsw-index.js';
-import { cosineSimilarity } from '../utils/similarity.js';
+import { cosineSimilarity, normalize } from '../utils/similarity.js';
 
 /**
  * Neuron Graph Manager options
@@ -191,6 +191,40 @@ export class NeuronGraphManager {
     }
 
     return neurons;
+  }
+
+  /**
+   * Find a near-duplicate neuron by embedding similarity.
+   * Returns the closest existing neuron if its score meets the threshold, null otherwise.
+   */
+  async findDuplicate(
+    embedding: Embedding384,
+    threshold: number = 0.95
+  ): Promise<NeuronNode | null> {
+    const results = this.index.search(embedding, 1);
+    if (results.length === 0) return null;
+    if (results[0].score < threshold) return null;
+    return this.store.getNeuron(results[0].id);
+  }
+
+  /**
+   * Merge new tags into an existing neuron without overwriting existing ones.
+   * No-ops if the neuron is not found or there are no new tags to add.
+   */
+  async mergeTags(neuronId: UUID, newTags: string[]): Promise<void> {
+    if (newTags.length === 0) return;
+    const neuron = await this.store.getNeuron(neuronId);
+    if (!neuron) return;
+    const existing = new Set(neuron.metadata.tags);
+    if (!newTags.some(t => !existing.has(t))) return; // nothing new
+    const mergedTags = [...new Set([...neuron.metadata.tags, ...newTags])];
+    await this.store.updateNeuron(neuronId, {
+      metadata: {
+        ...neuron.metadata,
+        tags: mergedTags,
+        updatedAt: new Date().toISOString(),
+      },
+    });
   }
 
   /**
@@ -443,6 +477,317 @@ export class NeuronGraphManager {
     return this.store.updateSynapseWeight(synapseId, newWeight);
   }
 
+  /**
+   * Hebbian co-activation reinforcement.
+   *
+   * When a set of neurons are retrieved together in the same search query,
+   * the synapses connecting them are strengthened using the soft-ceiling rule:
+   *   w_new = w + η * (1 - w)
+   * This ensures weights approach 1.0 asymptotically and never exceed it.
+   *
+   * @param neuronIds  IDs of co-activated neurons (e.g. top-k search results)
+   * @param eta        Hebbian learning rate (default: 0.05)
+   */
+  async reinforceCoActivation(
+    neuronIds: UUID[],
+    eta: number = 0.05
+  ): Promise<void> {
+    if (neuronIds.length < 2) return;
+
+    // Check all ordered pairs (i → j)
+    for (let i = 0; i < neuronIds.length; i++) {
+      for (let j = 0; j < neuronIds.length; j++) {
+        if (i === j) continue;
+        const synapse = await this.getConnection(neuronIds[i], neuronIds[j]);
+        if (!synapse) continue;
+
+        // Soft-ceiling Hebbian: w += η * (1 - w)
+        const newWeight = Math.min(1.0, synapse.weight + eta * (1 - synapse.weight));
+        await this.store.updateSynapseWeight(synapse.id, newWeight);
+        await this.store.recordSynapseActivation(synapse.id);
+      }
+    }
+  }
+
+  /**
+   * Compute the maximum synapse weight from a given neuron to any of the
+   * co-retrieved neurons. Used to boost search scores for well-connected results.
+   *
+   * @param neuronId      Source neuron
+   * @param peerIds       Set of peer neuron IDs in the same result set
+   * @returns             Max weight [0, 1], or 0 if no connecting synapses found
+   */
+  async maxCoActivationWeight(
+    neuronId: UUID,
+    peerIds: Set<UUID>
+  ): Promise<number> {
+    const outgoing = await this.store.getOutgoingSynapses(neuronId);
+    let max = 0;
+    for (const s of outgoing) {
+      if (s.type !== 'INHIBITORY' && peerIds.has(s.targetId) && s.weight > max) {
+        max = s.weight;
+      }
+    }
+    return max;
+  }
+
+  /**
+   * Competitive inhibition: strengthen INHIBITORY synapses from higher-ranked
+   * neurons toward lower-ranked neurons that are semantically similar.
+   *
+   * Biological analogy: Winner-Take-All inhibition. When neuron A consistently
+   * outranks neuron B in the same search, A inhibits B to prevent redundant
+   * results. This promotes search result diversity over time.
+   *
+   * Formula (soft floor): w -= η * (1 - |w|)  →  weight approaches -1.0
+   *
+   * @param rankedNeuronIds  Neuron IDs sorted best-first (index 0 = winner)
+   * @param eta              Inhibitory learning rate (default: 0.03)
+   */
+  async inhibitCoActivation(
+    rankedNeuronIds: UUID[],
+    eta: number = 0.03
+  ): Promise<void> {
+    if (rankedNeuronIds.length < 2) return;
+
+    // Winner → Loser: higher-rank inhibits lower-rank.
+    // Limit to top-3 winners to prevent O(k²) synapse explosion:
+    // k=10 uncapped → 45 pairs/search; capped at winner<3 → max 27 pairs/search.
+    const MAX_WINNERS = 3;
+    for (let winner = 0; winner < Math.min(MAX_WINNERS, rankedNeuronIds.length - 1); winner++) {
+      for (let loser = winner + 1; loser < rankedNeuronIds.length; loser++) {
+        const winnerId = rankedNeuronIds[winner];
+        const loserId  = rankedNeuronIds[loser];
+
+        // Find existing INHIBITORY synapse (winner → loser)
+        const synapses = await this.store.getOutgoingSynapses(winnerId);
+        const existing = synapses.find(
+          (s: Synapse) => s.targetId === loserId && s.type === 'INHIBITORY'
+        );
+
+        if (existing) {
+          // Deepen inhibition: w -= η * (1 - |w|), floor at -1.0
+          const newWeight = Math.max(-1.0, existing.weight - eta * (1 - Math.abs(existing.weight)));
+          await this.store.updateSynapseWeight(existing.id, newWeight);
+          await this.store.recordSynapseActivation(existing.id);
+        } else {
+          // Create new INHIBITORY synapse with small initial inhibition
+          await this.store.createSynapse(winnerId, loserId, 'INHIBITORY', -0.05, false);
+        }
+      }
+    }
+  }
+
+  /**
+   * Get the maximum absolute inhibitory weight targeting a neuron from any of
+   * the given peer neurons. Used to compute the inhibitory penalty in search.
+   *
+   * @param neuronId  Target neuron (potentially inhibited)
+   * @param peerIds   Set of peer neuron IDs (potential inhibitors)
+   * @returns         Max |weight| of INHIBITORY synapses from peers, or 0
+   */
+  async maxInhibitoryWeight(
+    neuronId: UUID,
+    peerIds: Set<UUID>
+  ): Promise<number> {
+    const incoming = await this.store.getIncomingSynapses(neuronId);
+    let max = 0;
+    for (const s of incoming) {
+      if (s.type === 'INHIBITORY' && peerIds.has(s.sourceId)) {
+        const absW = Math.abs(s.weight);
+        if (absW > max) max = absW;
+      }
+    }
+    return max;
+  }
+
+  /**
+   * Update a neuron's embedding vector (online learning).
+   * Deletes and re-inserts the node in the HNSW index to reflect the new vector.
+   *
+   * @param neuronId     Target neuron
+   * @param newEmbedding New (already L2-normalized) embedding
+   */
+  async updateNeuronEmbedding(
+    neuronId: UUID,
+    newEmbedding: Embedding384
+  ): Promise<void> {
+    await this.store.updateNeuron(neuronId, { embedding: newEmbedding });
+    // forceDelete performs immediate structural removal (not soft-delete),
+    // freeing the slot so insert can safely re-add the node.
+    this.index.forceDelete(neuronId);
+    try {
+      this.index.insert(neuronId, newEmbedding);
+    } catch {
+      // Guard against edge-case double-insert: clear and retry
+      this.index.forceDelete(neuronId);
+      this.index.insert(neuronId, newEmbedding);
+    }
+  }
+
+  /**
+   * Synaptic pruning — remove structurally weak and unused synapses.
+   *
+   * Biological analogy: adolescent synaptic pruning — the brain eliminates
+   * ~50% of synapses formed in childhood, keeping only used pathways.
+   * This sharpens signal/noise ratio and reduces metabolic cost.
+   *
+   * Pruning criteria (both conditions must hold):
+   *   - Excitatory:  weight < minWeight   AND activationCount < minActivations
+   *   - Inhibitory:  |weight| < minWeight AND activationCount < minActivations
+   *
+   * @param minWeight        Minimum weight to keep (default: 0.05)
+   * @param minActivations   Minimum activation count to keep (default: 2)
+   * @param dryRun           If true, count candidates without deleting
+   * @returns                Number of synapses pruned (or candidates in dryRun)
+   */
+  async pruneSynapses(options: {
+    minWeight?: number;
+    minActivations?: number;
+    dryRun?: boolean;
+  } = {}): Promise<{ pruned: number; remaining: number }> {
+    const {
+      minWeight    = 0.05,
+      minActivations = 2,
+      dryRun       = false,
+    } = options;
+
+    const allNeuronIds = await this.store.getAllNeuronIds();
+    const visitedSynapseIds = new Set<UUID>();
+    let pruned = 0;
+    let remaining = 0;
+
+    for (const neuronId of allNeuronIds) {
+      const outgoing = await this.store.getOutgoingSynapses(neuronId);
+
+      for (const synapse of outgoing) {
+        if (visitedSynapseIds.has(synapse.id)) continue;
+        visitedSynapseIds.add(synapse.id);
+
+        const absWeight   = Math.abs(synapse.weight);
+        const activations = synapse.metadata.activationCount;
+        const shouldPrune = absWeight < minWeight && activations < minActivations;
+
+        if (shouldPrune) {
+          if (!dryRun) await this.store.deleteSynapse(synapse.id);
+          pruned++;
+        } else {
+          remaining++;
+        }
+      }
+    }
+
+    return { pruned, remaining };
+  }
+
+  /**
+   * Hopfield-style iterative pattern completion.
+   *
+   * Biological analogy: associative pattern completion in hippocampus/cortex.
+   * A partial or noisy cue converges to the stored memory by iteratively
+   * moving the query embedding toward the centroid of retrieved memories.
+   *
+   * Algorithm (per iteration):
+   *   1. Search top-k with current embedding
+   *   2. Compute score-weighted centroid of retrieved embeddings
+   *   3. Blend: q_new = normalize(α*q_old + (1-α)*centroid)
+   *   4. Repeat
+   *
+   * @param embedding   Initial (possibly noisy/partial) query embedding
+   * @param k           Number of candidates per iteration
+   * @param iterations  Refinement iterations (default: 3)
+   * @param alpha       Retention weight for original query (default: 0.3)
+   * @returns           Refined embedding and convergence delta
+   */
+  async patternComplete(
+    embedding: Embedding384,
+    k: number = 10,
+    iterations: number = 3,
+    alpha: number = 0.3
+  ): Promise<{ refined: Embedding384; delta: number }> {
+    let current = embedding;
+    let delta = 0;
+
+    for (let iter = 0; iter < iterations; iter++) {
+      const results = this.index.search(current, k);
+      if (results.length === 0) break;
+
+      // Only use above-average scoring neurons for centroid.
+      // Using all k neurons in a small index would pull toward global mean,
+      // defeating convergence. Keeping the top half ensures the attractor
+      // is specific to the query cluster.
+      const meanScore = results.reduce((s, r) => s + r.score, 0) / results.length;
+      const topResults = results.filter(r => r.score >= meanScore);
+
+      // Score-weighted centroid of selected neurons
+      const centroid = new Float32Array(384);
+      let totalScore = 0;
+      for (const r of topResults) {
+        const neuron = await this.store.getNeuron(r.id);
+        if (!neuron) continue;
+        for (let d = 0; d < 384; d++) {
+          centroid[d] += r.score * neuron.embedding[d];
+        }
+        totalScore += r.score;
+      }
+      if (totalScore === 0) break;
+      for (let d = 0; d < 384; d++) centroid[d] /= totalScore;
+
+      // Blend: retain alpha of original, pull (1-alpha) toward centroid
+      const blended = new Float32Array(384);
+      for (let d = 0; d < 384; d++) {
+        blended[d] = alpha * current[d] + (1 - alpha) * centroid[d];
+      }
+      const refined = normalize(blended);
+
+      // Measure convergence (L2 distance between iterations)
+      delta = Math.sqrt(
+        Array.from(refined).reduce((s, v, i) => s + (v - current[i]) ** 2, 0)
+      );
+      current = refined;
+
+      if (delta < 1e-4) break; // Converged
+    }
+
+    return { refined: current, delta };
+  }
+
+  /**
+   * Build episodic memory: create TEMPORAL synapses between neurons accessed
+   * together in the same search episode. This encodes the "context chain"
+   * of a reasoning session, analogous to hippocampal sequence encoding.
+   *
+   * @param episodeNeuronIds  Ordered list of neuron IDs in one episode
+   * @param maxDistance       Max positional distance to link (default: 2)
+   */
+  async encodeEpisode(
+    episodeNeuronIds: UUID[],
+    maxDistance: number = 2
+  ): Promise<void> {
+    if (episodeNeuronIds.length < 2) return;
+
+    for (let i = 0; i < episodeNeuronIds.length; i++) {
+      for (let j = i + 1; j <= Math.min(i + maxDistance, episodeNeuronIds.length - 1); j++) {
+        const srcId = episodeNeuronIds[i];
+        const tgtId = episodeNeuronIds[j];
+
+        // Skip if TEMPORAL synapse already exists
+        const existing = await this.getConnection(srcId, tgtId);
+        if (existing?.type === 'TEMPORAL') {
+          // Strengthen existing temporal link
+          const newW = Math.min(1.0, existing.weight + 0.05 * (1 - existing.weight));
+          await this.store.updateSynapseWeight(existing.id, newW);
+          await this.store.recordSynapseActivation(existing.id);
+        } else if (!existing) {
+          // Create new TEMPORAL synapse — initial weight decays with distance
+          const distance = j - i; // relative distance (1 or 2), not absolute index
+          const initialWeight = 0.3 / distance; // closer = stronger
+          await this.store.createSynapse(srcId, tgtId, 'TEMPORAL', initialWeight, false);
+        }
+      }
+    }
+  }
+
   // ==================== Private Traversal Methods ====================
 
   private async bfsTraverse(
@@ -674,12 +1019,16 @@ export class NeuronGraphManager {
       const outgoing = await this.store.getOutgoingSynapses(currentId);
       if (outgoing.length === 0) break;
 
-      // Weight-biased random selection
-      const totalSynapseWeight = outgoing.reduce((s: number, syn: Synapse) => s + syn.weight, 0);
+      // Weight-biased random selection — use only excitatory (positive-weight) synapses
+      // INHIBITORY synapses have negative weights and would break the roulette algorithm
+      const excitatory = outgoing.filter((syn: Synapse) => syn.weight > 0);
+      if (excitatory.length === 0) break; // only inhibitory connections, nowhere to go
+
+      const totalSynapseWeight = excitatory.reduce((s: number, syn: Synapse) => s + syn.weight, 0);
       let random = Math.random() * totalSynapseWeight;
 
       let selectedSynapse: Synapse | null = null;
-      for (const synapse of outgoing) {
+      for (const synapse of excitatory) {
         random -= synapse.weight;
         if (random <= 0) {
           selectedSynapse = synapse;

@@ -23,6 +23,7 @@ import { NeuronGraphManager } from '../core/neuron-graph.js';
 import { generateUUID } from '../utils/uuid.js';
 import { now } from '../utils/index.js';
 import { DeterministicEmbeddingProvider } from './embedding-provider.js';
+import { parallelChunk } from '../utils/concurrency.js';
 
 /**
  * Ingestion job
@@ -61,6 +62,14 @@ export interface IngestionOptions {
   sourceCharset?: string;
   sourcePath?: string;
   sourceName?: string;
+  /**
+   * Cosine similarity threshold for semantic deduplication (0–1).
+   * If an existing neuron scores at or above this value the new ingest is
+   * skipped and the existing neuron is returned (with tags merged).
+   * Set to 0 to disable deduplication entirely.
+   * @default 0.95
+   */
+  deduplicationThreshold?: number;
 }
 
 /**
@@ -132,39 +141,61 @@ export class IngestionService {
     try {
       job.status = 'RUNNING';
 
-      // Configure chunk engine
-      if (options.useCDC !== undefined || options.chunkSize !== undefined) {
-        this.chunkEngine = new ChunkEngine({
-          useCDC: options.useCDC,
-          chunkSize: options.chunkSize
-        });
+      // ── Step 1: Generate embedding first (required for dedup check) ──────
+      const text = data.toString('utf-8');
+      const embedding = await this.embeddingProvider.embed(text);
+      job.progress = 30;
+
+      // ── Step 2: Semantic deduplication check ─────────────────────────────
+      // Default threshold: 0.95 (near-exact semantic duplicates only).
+      // Set deduplicationThreshold: 0 in options to skip.
+      const dedupThreshold = options.deduplicationThreshold ?? 0.95;
+      if (dedupThreshold > 0) {
+        const duplicate = await this.graphManager.findDuplicate(embedding, dedupThreshold);
+        if (duplicate) {
+          // Merge any new tags into the existing neuron
+          if (options.tags?.length) {
+            await this.graphManager.mergeTags(duplicate.id, options.tags);
+          }
+          job.neuronId = duplicate.id;
+          job.status = 'COMPLETED';
+          job.progress = 100;
+          job.completedAt = now();
+          return duplicate;
+        }
       }
 
-      // Chunk the data
-      const chunks = this.chunkEngine.chunk(data);
+      // ── Step 3: No duplicate — chunk and store ───────────────────────────
+      // CDC auto-detection: enable for files ≥ 32 KB.
+      // Content-defined boundaries produce stable chunk hashes across
+      // document versions, enabling cross-document byte dedup in ChunkStore.
+      // Fixed chunking is retained for small files (lower overhead, typically
+      // produces a single chunk anyway).
+      const CDC_AUTO_THRESHOLD = 32 * 1024; // 32 KB
+      const useCDC = options.useCDC ?? (data.length >= CDC_AUTO_THRESHOLD);
+
+      // Create a per-call engine so concurrent ingests don't race on this.chunkEngine
+      const chunkEngine = new ChunkEngine({
+        useCDC,
+        chunkSize: options.chunkSize
+      });
+
+      const chunks = chunkEngine.chunk(data);
       job.totalChunks = chunks.length;
 
-      // Store chunks
       for (const chunk of chunks) {
         await this.chunkStore.put(chunk);
         job.processedChunks++;
-        job.progress = (job.processedChunks / job.totalChunks) * 50;
+        job.progress = 30 + (job.processedChunks / job.totalChunks) * 40;
       }
 
-      // Build Merkle tree from chunk hashes
+      // ── Step 4: Build Merkle tree ─────────────────────────────────────────
       const chunkHashes = chunks.map(c => c.hash);
       const merkleTree = this.merkleEngine.buildTree(chunkHashes);
-
       job.merkleRoot = merkleTree.root;
-      job.progress = 60;
-
-      // Generate embedding from text content
-      const text = data.toString('utf-8');
-      const embedding = await this.embeddingProvider.embed(text);
-
       job.progress = 80;
 
-      // Create neuron
+      // ── Step 5: Create neuron ─────────────────────────────────────────────
       const neuron = await this.graphManager.createNeuron({
         embedding,
         chunkHashes,
@@ -201,20 +232,15 @@ export class IngestionService {
   }
 
   /**
-   * Ingest multiple texts as separate neurons
+   * Ingest multiple texts as separate neurons.
+   * Uses parallelChunk(concurrency=5) — each ingestText operates on a unique
+   * key so there are no LevelDB write conflicts between concurrent calls.
    */
   async ingestBatch(
     texts: string[],
     options: IngestionOptions = {}
   ): Promise<NeuronNode[]> {
-    const neurons: NeuronNode[] = [];
-
-    for (const text of texts) {
-      const neuron = await this.ingestText(text, options);
-      neurons.push(neuron);
-    }
-
-    return neurons;
+    return parallelChunk(texts, 5, text => this.ingestText(text, options));
   }
 
   /**
@@ -307,30 +333,49 @@ export class IngestionService {
     try {
       job.status = 'RUNNING';
 
-      // Chunk the data
-      const chunks = this.chunkEngine.chunk(data);
+      // ── Step 1: Embedding first ───────────────────────────────────────────
+      const text = data.toString('utf-8');
+      const embedding = await this.embeddingProvider.embed(text);
+      job.progress = 30;
+
+      // ── Step 2: Semantic deduplication check ─────────────────────────────
+      const dedupThreshold = options.deduplicationThreshold ?? 0.95;
+      if (dedupThreshold > 0) {
+        const duplicate = await this.graphManager.findDuplicate(embedding, dedupThreshold);
+        if (duplicate) {
+          if (options.tags?.length) {
+            await this.graphManager.mergeTags(duplicate.id, options.tags);
+          }
+          job.neuronId = duplicate.id;
+          job.status = 'COMPLETED';
+          job.progress = 100;
+          job.completedAt = now();
+          return;
+        }
+      }
+
+      // ── Step 3: Chunk and store ───────────────────────────────────────────
+      const CDC_AUTO_THRESHOLD = 32 * 1024;
+      const useCDC = options.useCDC ?? (data.length >= CDC_AUTO_THRESHOLD);
+      const chunkEngine = new ChunkEngine({ useCDC, chunkSize: options.chunkSize });
+
+      const chunks = chunkEngine.chunk(data);
       job.totalChunks = chunks.length;
 
-      // Store chunks
       for (const chunk of chunks) {
         if (job.status !== 'RUNNING') return; // Check for cancellation
         await this.chunkStore.put(chunk);
         job.processedChunks++;
-        job.progress = (job.processedChunks / job.totalChunks) * 50;
+        job.progress = 30 + (job.processedChunks / job.totalChunks) * 40;
       }
 
-      // Build Merkle tree
+      // ── Step 4: Merkle tree ───────────────────────────────────────────────
       const chunkHashes = chunks.map(c => c.hash);
       const merkleTree = this.merkleEngine.buildTree(chunkHashes);
       job.merkleRoot = merkleTree.root;
-      job.progress = 60;
-
-      // Generate embedding
-      const text = data.toString('utf-8');
-      const embedding = await this.embeddingProvider.embed(text);
       job.progress = 80;
 
-      // Create neuron
+      // ── Step 5: Create neuron ─────────────────────────────────────────────
       const neuron = await this.graphManager.createNeuron({
         embedding,
         chunkHashes,

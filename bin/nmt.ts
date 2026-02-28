@@ -42,6 +42,9 @@ Probabilistic Ontology (확률적 존재론):
   dimension <sub>       Dynamic dimensions (list|expand|analyze|stats)
   sync <sub>            State synchronization (status|changes|export|import|peers)
 
+  feedback <id>         Record relevance feedback to adjust neuron embedding
+  prune                 Remove weak/unused synapses (synaptic pruning)
+  memory                Show or clear working memory
   benchmark             Run performance benchmarks
 
 Database Bridge (외부 DB 연동):
@@ -72,6 +75,12 @@ Examples:
   nmt ingest ./docs/article.txt -t "ml,tutorial"
   nmt search "machine learning" -k 5
   nmt stats
+  nmt feedback <neuron-id> --query "machine learning" --relevant
+  nmt feedback <neuron-id> --query "cooking recipes" --irrelevant
+  nmt prune --dry-run
+  nmt prune --min-weight 0.1 --min-activations 3
+  nmt memory
+  nmt memory clear
 
   # Probabilistic Ontology
   nmt infer forward <neuron-id>           # Forward causation
@@ -203,14 +212,16 @@ async function bootstrap(config: Config): Promise<NMTContext> {
   const chunkEngine = new ChunkEngine();
   const merkleEngine = new MerkleEngine();
 
-  // Load existing HNSW index or create new
-  // IndexStore.load() returns HNSWIndex instance directly (handles deserialization internally)
+  // Load existing HNSW index or create new with tuned parameters
+  // M=32 provides more connections for better recall at scale
+  // efConstruction=400 builds a more precise index
+  // efSearch=100 enables wider search for better accuracy
   let hnswIndex: any;
   try {
     const loaded = await indexStore.load('main');
-    hnswIndex = loaded ?? new HNSWIndex();
+    hnswIndex = loaded ?? new HNSWIndex({ M: 32, efConstruction: 400, efSearch: 100 });
   } catch {
-    hnswIndex = new HNSWIndex();
+    hnswIndex = new HNSWIndex({ M: 32, efConstruction: 400, efSearch: 100 });
   }
 
   // Graph manager (with lower threshold for auto-connect)
@@ -220,9 +231,18 @@ async function bootstrap(config: Config): Promise<NMTContext> {
     semanticThreshold: 0.3,  // Lower threshold for more connections
   });
 
-  // Embedding Provider (Xenova)
+  // Embedding Provider (Xenova — first call may download ~27MB model)
   const { getEmbeddingProvider } = await import('../src/services/embedding-provider.js');
+  if (!process.env.NMT_QUIET) {
+    process.stderr.write('Loading embedding model...\r');
+  }
   const embeddingProvider = await getEmbeddingProvider();
+  if (!process.env.NMT_QUIET) {
+    const modelLabel = embeddingProvider.isReady()
+      ? 'all-MiniLM-L6-v2 (ready)'
+      : 'deterministic fallback (Xenova unavailable)';
+    process.stderr.write(`Embedding model: ${modelLabel}        \n`);
+  }
 
   // Services
   const ingestionService = new IngestionService(
@@ -266,9 +286,8 @@ async function bootstrap(config: Config): Promise<NMTContext> {
     if (savedStates.dimensions && embeddingManager.loadDimensions) {
       embeddingManager.loadDimensions(savedStates.dimensions);
     }
-  } catch (err: any) {
-    // Probabilistic modules are optional - graceful degradation
-    console.warn(`Note: Probabilistic extensions not fully loaded: ${err.message}`);
+  } catch {
+    // Probabilistic modules are optional — silently degrade
   }
 
   // State Synchronization (상태 동기화)
@@ -305,9 +324,8 @@ async function bootstrap(config: Config): Promise<NMTContext> {
     });
 
     await syncManager.init();
-  } catch (err: any) {
-    // Sync modules are optional - graceful degradation
-    console.warn(`Note: Sync extensions not fully loaded: ${err.message}`);
+  } catch {
+    // Sync modules are optional — silently degrade
   }
 
   _ctx = {
@@ -326,37 +344,31 @@ async function bootstrap(config: Config): Promise<NMTContext> {
 
 async function shutdown(): Promise<void> {
   if (!_ctx) return;
+  // Save HNSW index — failure means new neurons won't persist
   try {
-    // Save HNSW index
     await _ctx.indexStore.save('main', _ctx.hnswIndex);
+  } catch (err: any) {
+    console.error(`[nmt] Warning: failed to save HNSW index — ${err.message}`);
+  }
 
-    // Save probabilistic module states
+  // Save probabilistic module states (optional, non-fatal)
+  try {
     if (_ctx.probabilisticStore) {
       const states: any = {};
-      if (_ctx.attractorModel?.serialize) {
-        states.attractors = _ctx.attractorModel.serialize();
-      }
-      if (_ctx.neuronManager?.serialize) {
-        states.neurons = _ctx.neuronManager.serialize();
-      }
-      if (_ctx.embeddingManager?.serializeDimensions) {
-        states.dimensions = _ctx.embeddingManager.serializeDimensions();
-      }
+      if (_ctx.attractorModel?.serialize) states.attractors = _ctx.attractorModel.serialize();
+      if (_ctx.neuronManager?.serialize) states.neurons = _ctx.neuronManager.serialize();
+      if (_ctx.embeddingManager?.serializeDimensions) states.dimensions = _ctx.embeddingManager.serializeDimensions();
       await _ctx.probabilisticStore.saveAll(states);
       await _ctx.probabilisticStore.close();
     }
+  } catch { /* optional — ignore */ }
 
-    await _ctx.chunkStore.close();
-    await _ctx.neuronStore.close();
-    await _ctx.indexStore.close();
+  // Close stores
+  try { await _ctx.chunkStore.close(); } catch { /* ignore */ }
+  try { await _ctx.neuronStore.close(); } catch { /* ignore */ }
+  try { await _ctx.indexStore.close(); } catch { /* ignore */ }
+  try { if (_ctx.journalDb) await _ctx.journalDb.close(); } catch { /* ignore */ }
 
-    // Close journal DB if initialized
-    if (_ctx.journalDb) {
-      await _ctx.journalDb.close();
-    }
-  } catch {
-    // Ignore shutdown errors
-  }
   _ctx = null;
 }
 
@@ -420,6 +432,23 @@ async function cmdInit(config: Config) {
     };
     writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
     log(`  Created config: ${configPath}`, config);
+  }
+
+  // Pre-warm embedding model (downloads ~27MB on first run, then cached)
+  log('\n  Initializing embedding model (first run may download ~27MB)...', config);
+  try {
+    const { getEmbeddingProvider } = await import('../src/services/embedding-provider.js');
+    const provider = await getEmbeddingProvider();
+    // Trigger actual model load with a dummy embed
+    await provider.embed('nmt-init-warmup');
+    if (provider.isReady()) {
+      log('  Embedding model ready (all-MiniLM-L6-v2).', config);
+    } else {
+      log('  Using deterministic fallback (Xenova not available).', config);
+    }
+  } catch (err: any) {
+    log(`  Warning: embedding model init failed — ${err.message}`, config);
+    log('  Semantic search will use deterministic fallback.', config);
   }
 
   log('\n  NMT initialized successfully!', config, { status: 'success', dataDir: config.dataDir });
@@ -619,6 +648,8 @@ async function cmdSearch(args: string[], config: Config) {
         results: results.map((r: any) => ({
           neuronId: r.neuron.id,
           score: r.score,
+          sourceName: r.neuron.metadata.sourceName,
+          sourcePath: r.neuron.metadata.sourcePath,
           tags: r.neuron.metadata.tags,
           sourceType: r.neuron.metadata.sourceType,
           ...(r.content ? { content: r.content } : {}),
@@ -631,8 +662,9 @@ async function cmdSearch(args: string[], config: Config) {
         for (let i = 0; i < results.length; i++) {
           const r = results[i];
           const score = r.score.toFixed(4);
+          const sourceName = r.neuron.metadata.sourceName || r.neuron.metadata.tags.join(', ') || '(none)';
           log(`  #${i + 1}  [${score}]  ${r.neuron.id}`, config);
-          log(`      Tags: ${r.neuron.metadata.tags.join(', ') || '(none)'}  |  Source: ${r.neuron.metadata.sourceType}`, config);
+          log(`      Source: ${sourceName}  |  Type: ${r.neuron.metadata.sourceType}`, config);
           if (r.content) {
             log(`      Content: ${truncate(r.content.replace(/\n/g, ' '), 150)}`, config);
           }
@@ -928,6 +960,144 @@ async function cmdStats(config: Config) {
 }
 
 // ============== Commands: Graph Management ==============
+
+async function cmdFeedback(args: string[], config: Config) {
+  const neuronId = args[0];
+  if (!neuronId) {
+    console.error('Usage: nmt feedback <neuron-id> --query "..." [--relevant|--irrelevant]');
+    process.exit(1);
+  }
+
+  const queryIdx = args.indexOf('--query');
+  const query = queryIdx !== -1 ? args[queryIdx + 1] : undefined;
+  if (!query) {
+    console.error('Error: --query "..." is required');
+    process.exit(1);
+  }
+
+  const hasRelevant   = args.includes('--relevant');
+  const hasIrrelevant = args.includes('--irrelevant');
+  if (!hasRelevant && !hasIrrelevant) {
+    console.error('Error: --relevant or --irrelevant is required');
+    process.exit(1);
+  }
+  if (hasRelevant && hasIrrelevant) {
+    console.error('Error: --relevant and --irrelevant are mutually exclusive');
+    process.exit(1);
+  }
+  const relevant = hasRelevant;
+  const ctx = await bootstrap(config);
+
+  try {
+    const result = await ctx.queryService.recordFeedback(neuronId, query, relevant);
+
+    if (config.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log('');
+      console.log(`Neuron:        ${result.neuronId}`);
+      console.log(`Feedback:      ${relevant ? '✅ Relevant (LTP)' : '❌ Irrelevant (LTD)'}`);
+      console.log(`Query:         "${query}"`);
+      console.log(`Embedding drift: ${result.embeddingDrift.toFixed(6)}`);
+      console.log(`Total feedbacks: ${result.feedbackCount}`);
+    }
+
+    await shutdown();
+  } catch (error: any) {
+    await shutdown();
+    console.error('Feedback failed:', error.message);
+    process.exit(1);
+  }
+}
+
+async function cmdPrune(args: string[], config: Config) {
+  const dryRun      = args.includes('--dry-run');
+  const minWIdx     = args.indexOf('--min-weight');
+  const minActIdx   = args.indexOf('--min-activations');
+  const minWeight   = minWIdx   !== -1 ? parseFloat(args[minWIdx + 1])   : 0.05;
+  const minAct      = minActIdx !== -1 ? parseInt(args[minActIdx + 1])   : 2;
+
+  const ctx = await bootstrap(config);
+  try {
+    if (dryRun) console.log('DRY RUN — no synapses will be deleted');
+    console.log(`Criteria: weight < ${minWeight} AND activationCount < ${minAct}`);
+    const result = await ctx.graphManager.pruneSynapses({ minWeight, minActivations: minAct, dryRun });
+
+    if (config.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log('');
+      console.log(dryRun
+        ? `Would prune: ${result.pruned} synapses`
+        : `Pruned:      ${result.pruned} synapses`);
+      console.log(`Remaining:   ${result.remaining} synapses`);
+    }
+    await shutdown();
+  } catch (error: any) {
+    await shutdown();
+    console.error('Prune failed:', error.message);
+    process.exit(1);
+  }
+}
+
+async function cmdMemory(args: string[], config: Config) {
+  const subCmd = args[0] ?? 'show';
+  const apiBase = `http://localhost:${config.port}/api/v1`;
+
+  if (subCmd === 'clear') {
+    // Attempt live API call; explain clearly if dashboard is not running
+    try {
+      const res = await fetch(`${apiBase}/working-memory`, { method: 'DELETE' });
+      if (res.ok) {
+        console.log('Working memory cleared (via dashboard API).');
+      } else {
+        console.error(`Dashboard returned HTTP ${res.status}.`);
+      }
+    } catch {
+      // Dashboard not running — CLI is stateless, WM is always empty at startup
+      console.log('Note: No action taken.');
+      console.log(`No dashboard is running on port ${config.port}.`);
+      console.log('Working memory exists only inside a running dashboard process and is');
+      console.log('always empty when the CLI starts. To clear a live session:');
+      console.log(`  1. nmt dashboard -p ${config.port}`);
+      console.log(`  2. curl -X DELETE ${apiBase}/working-memory`);
+    }
+    return;
+  }
+
+  // show: fetch live state from dashboard if available
+  try {
+    const res = await fetch(`${apiBase}/working-memory`);
+    if (res.ok) {
+      const data = await res.json() as { workingMemory: string[]; dopamineLevel: number };
+      console.log('');
+      console.log('Working Memory (live) — 7-slot LRU:');
+      if (data.workingMemory.length === 0) {
+        console.log('  (empty)');
+      } else {
+        data.workingMemory.forEach((id: string, i: number) => {
+          console.log(`  [${i + 1}] ${id}`);
+        });
+      }
+      console.log('');
+      console.log(`Dopamine level: ${data.dopamineLevel.toFixed(4)}`);
+      return;
+    }
+  } catch {
+    // Dashboard not running — fall through to static explanation
+  }
+
+  // Static info when no dashboard is available
+  console.log('');
+  console.log('Working Memory: 7-slot LRU (Miller\'s Law)');
+  console.log('  • Populated during search (most recent 7 neuron IDs)');
+  console.log('  • Provides +15% boost to connected neurons in next search');
+  console.log('  • Clears when topic changes or session ends');
+  console.log('');
+  console.log(`No dashboard running on port ${config.port}. Start with:`);
+  console.log(`  nmt dashboard -p ${config.port}`);
+  console.log(`  nmt memory   # then run this again for live state`);
+}
 
 async function cmdConnect(_args: string[], config: Config) {
   const ctx = await bootstrap(config);
@@ -1541,6 +1711,15 @@ async function main() {
     case 'connect':
       await cmdConnect(args, config);
       break;
+    case 'feedback':
+      await cmdFeedback(args, config);
+      break;
+    case 'prune':
+      await cmdPrune(args, config);
+      break;
+    case 'memory':
+      await cmdMemory(args, config);
+      break;
 
     // Benchmarks & Backup
     case 'benchmark':
@@ -1598,6 +1777,21 @@ process.on('SIGTERM', async () => {
   console.error('\nTerminated. Closing databases...');
   await shutdown();
   process.exit(143);  // 128 + SIGTERM(15)
+});
+
+// Guard against fatal errors that bypass main().catch() —
+// ensures DB connections are always closed cleanly on crash.
+process.on('uncaughtException', async (err) => {
+  console.error('[nmt] Fatal error:', err.message);
+  await shutdown();
+  process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error('[nmt] Unhandled async error:', msg);
+  await shutdown();
+  process.exit(1);
 });
 
 main().catch(async error => {

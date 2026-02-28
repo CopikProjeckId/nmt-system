@@ -35,6 +35,8 @@ export class HNSWIndex {
   private nodes: Map<UUID, HNSWNode>;
   private entryPoint: UUID | null;
   private maxLayer: number;
+  private tombstones: Set<UUID> = new Set();
+  private entryPointStale = false;
 
   constructor(params: Partial<HNSWParams> = {}) {
     this.params = {
@@ -51,10 +53,10 @@ export class HNSWIndex {
   }
 
   /**
-   * Get the number of nodes in the index
+   * Get the number of live (non-tombstoned) nodes in the index
    */
   get size(): number {
-    return this.nodes.size;
+    return this.nodes.size - this.tombstones.size;
   }
 
   /**
@@ -160,6 +162,16 @@ export class HNSWIndex {
       return [];
     }
 
+    // Lazy entry-point refresh after soft-deletes
+    if (this.entryPointStale) {
+      this.updateEntryPoint();
+      this.entryPointStale = false;
+    }
+
+    if (this.entryPoint === null) {
+      return [];
+    }
+
     const efSearch = ef ?? this.params.efSearch;
 
     // Navigate from top layer to layer 1
@@ -171,53 +183,103 @@ export class HNSWIndex {
     // Search layer 0 with ef expansion
     const candidates = this.searchLayer(currentNode, query, Math.max(efSearch, k), 0);
 
-    // Return top k results
-    return candidates.slice(0, k);
+    // Filter tombstoned nodes before returning
+    return candidates.filter(r => !this.tombstones.has(r.id)).slice(0, k);
   }
 
   /**
-   * Delete a node from the index
+   * Soft-delete a node — O(1), marks as tombstone.
+   * The node is excluded from search results and `has()` checks immediately,
+   * but its connections are not removed until `compact()` is called.
    * @param id - Node identifier to delete
    */
   delete(id: UUID): boolean {
-    const node = this.nodes.get(id);
-    if (!node) {
+    if (!this.nodes.has(id) || this.tombstones.has(id)) {
       return false;
     }
+    this.tombstones.add(id);
+    if (this.entryPoint === id) {
+      this.entryPointStale = true;
+    }
+    return true;
+  }
 
-    // Remove connections from all neighbors
-    for (const [layer, connections] of node.connections) {
-      for (const neighborId of connections) {
-        const neighbor = this.nodes.get(neighborId);
-        if (neighbor && neighbor.connections.has(layer)) {
-          neighbor.connections.get(layer)!.delete(id);
-        }
-      }
+  /**
+   * Immediately remove a node and clean up all its connections.
+   * Used by `updateNeuronEmbedding` which needs the slot free for re-insert.
+   * @param id - Node identifier to delete
+   */
+  forceDelete(id: UUID): boolean {
+    // Remove from tombstone set if present
+    this.tombstones.delete(id);
 
-      // Remove from layer
-      const layerData = this.layers.get(layer);
-      if (layerData) {
-        layerData.nodes.delete(id);
+    const node = this.nodes.get(id);
+    if (!node) return false;
+
+    // Remove bidirectional connections
+    for (const [layer, conns] of node.connections) {
+      for (const nbrId of conns) {
+        this.nodes.get(nbrId)?.connections.get(layer)?.delete(id);
       }
+      this.layers.get(layer)?.nodes.delete(id);
     }
 
-    // Remove node
     this.nodes.delete(id);
 
-    // Update entry point if necessary
     if (this.entryPoint === id) {
-      this.updateEntryPoint();
+      this.entryPoint = null;
+      this.entryPointStale = true;
     }
 
     return true;
   }
 
   /**
-   * Check if a node exists in the index
+   * Compact the index by physically removing all tombstoned nodes.
+   * Should be called periodically in the background (e.g. after bulk deletes).
+   * @returns Number of nodes actually removed
+   */
+  compact(): { removed: number } {
+    let removed = 0;
+
+    for (const id of this.tombstones) {
+      const node = this.nodes.get(id);
+      if (!node) {
+        this.tombstones.delete(id);
+        continue;
+      }
+
+      // Remove bidirectional connections
+      for (const [layer, conns] of node.connections) {
+        for (const nbrId of conns) {
+          this.nodes.get(nbrId)?.connections.get(layer)?.delete(id);
+        }
+        this.layers.get(layer)?.nodes.delete(id);
+      }
+
+      this.nodes.delete(id);
+      this.tombstones.delete(id);
+      removed++;
+    }
+
+    if (removed > 0) {
+      this.updateEntryPoint();
+    }
+
+    return { removed };
+  }
+
+  /** Number of soft-deleted nodes pending compaction */
+  get tombstoneCount(): number {
+    return this.tombstones.size;
+  }
+
+  /**
+   * Check if a node exists in the index (excludes tombstoned nodes)
    * @param id - Node identifier
    */
   has(id: UUID): boolean {
-    return this.nodes.has(id);
+    return this.nodes.has(id) && !this.tombstones.has(id);
   }
 
   /**
@@ -229,10 +291,10 @@ export class HNSWIndex {
   }
 
   /**
-   * Get all node IDs
+   * Get all live (non-tombstoned) node IDs
    */
   getAllIds(): UUID[] {
-    return Array.from(this.nodes.keys());
+    return Array.from(this.nodes.keys()).filter(id => !this.tombstones.has(id));
   }
 
   /**
@@ -252,6 +314,7 @@ export class HNSWIndex {
 
     const serializedNodes: HNSWNode[] = [];
     for (const node of this.nodes.values()) {
+      if (this.tombstones.has(node.id)) continue;
       const connections = new Map<number, Set<UUID>>();
       for (const [layer, conns] of node.connections) {
         connections.set(layer, new Set(conns));
@@ -345,6 +408,7 @@ export class HNSWIndex {
       if (!connections) break;
 
       for (const neighborId of connections) {
+        if (this.tombstones.has(neighborId)) continue;
         const neighbor = this.nodes.get(neighborId);
         if (!neighbor) continue;
 
@@ -413,6 +477,7 @@ export class HNSWIndex {
         if (visited.has(neighborId)) continue;
         visited.add(neighborId);
 
+        if (this.tombstones.has(neighborId)) continue;
         const neighbor = this.nodes.get(neighborId);
         if (!neighbor) continue;
 
@@ -477,11 +542,12 @@ export class HNSWIndex {
    * Update entry point after deletion
    */
   private updateEntryPoint(): void {
-    // Find node with highest layer
+    // Find live node with highest layer
     let maxLayer = -1;
     let newEntry: UUID | null = null;
 
     for (const node of this.nodes.values()) {
+      if (this.tombstones.has(node.id)) continue;
       if (node.layer > maxLayer) {
         maxLayer = node.layer;
         newEntry = node.id;
@@ -528,6 +594,8 @@ export class HNSWIndex {
     const connectionCounts = new Map<number, number[]>();
 
     for (const node of this.nodes.values()) {
+      if (this.tombstones.has(node.id)) continue;
+
       // Count nodes per layer
       const count = layerDistribution.get(node.layer) ?? 0;
       layerDistribution.set(node.layer, count + 1);
@@ -549,7 +617,7 @@ export class HNSWIndex {
     }
 
     return {
-      totalNodes: this.nodes.size,
+      totalNodes: this.nodes.size - this.tombstones.size,
       layerDistribution,
       avgConnectionsPerLayer,
       maxLayer: this.maxLayer

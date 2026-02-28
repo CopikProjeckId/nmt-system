@@ -77,6 +77,7 @@ export class CLIDashboardServer {
   private verifyService!: VerificationService;
 
   private initialized: boolean = false;
+  private compactionScheduler: import('../utils/compaction-scheduler.js').CompactionScheduler | null = null;
 
   constructor(options: CLIDashboardOptions = {}) {
     this.port = options.port ?? 3001;
@@ -184,6 +185,21 @@ export class CLIDashboardServer {
     this.initialized = true;
     this.startTime = Date.now();
 
+    // Start background compaction scheduler
+    const { CompactionScheduler } = await import('../utils/compaction-scheduler.js');
+    const { ChunkStore } = await import('../storage/chunk-store.js');
+    const { NeuronStore } = await import('../storage/neuron-store.js');
+    this.compactionScheduler = new CompactionScheduler({
+      hnswIndex: this.hnswIndex,
+      stores: [
+        this.chunkStore as unknown as { compact(): Promise<void> },
+        this.neuronStore as unknown as { compact(): Promise<void> },
+      ],
+      tombstoneThreshold: 50,
+      intervalMs: 5 * 60 * 1000,
+    });
+    this.compactionScheduler.start();
+
     console.log(`CLI Dashboard initialized (LevelDB: ${resolve(this.dataDir)})`);
   }
 
@@ -193,11 +209,33 @@ export class CLIDashboardServer {
   async start(): Promise<void> {
     await this.init();
 
-    return new Promise((resolve) => {
+    // Guard against fatal errors that bypass normal error handlers
+    const emergencyShutdown = async (label: string, reason: unknown) => {
+      const msg = reason instanceof Error ? reason.message : String(reason);
+      console.error(`[nmt-dashboard] ${label}: ${msg}`);
+      await this.stop().catch(() => {});
+      process.exit(1);
+    };
+
+    process.on('uncaughtException',  (err)    => void emergencyShutdown('Fatal error', err));
+    process.on('unhandledRejection', (reason) => void emergencyShutdown('Unhandled async error', reason));
+
+    return new Promise((resolve, reject) => {
       this.server = this.app.listen(this.port, () => {
         console.log(`NMT CLI Dashboard running at http://localhost:${this.port}`);
         console.log(`Data directory: ${path.resolve(this.dataDir)}`);
         resolve();
+      });
+
+      this.server.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          reject(new Error(
+            `Port ${this.port} is already in use.\n` +
+            `  Try a different port: nmt dashboard -p ${this.port + 1}`
+          ));
+        } else {
+          reject(err);
+        }
       });
     });
   }
@@ -208,8 +246,14 @@ export class CLIDashboardServer {
    */
   async stop(): Promise<void> {
     if (this.initialized) {
+      this.compactionScheduler?.stop();
+
+      // Final compaction before shutdown (flush any pending tombstones)
+      if (this.hnswIndex.tombstoneCount > 0) {
+        this.hnswIndex.compact();
+      }
+
       try {
-        // IndexStore.save() takes HNSWIndex instance directly (handles serialization internally)
         await this.indexStore.save('main', this.hnswIndex);
       } catch {
         // Ignore save errors during shutdown
@@ -558,6 +602,43 @@ export class CLIDashboardServer {
             weight: s.weight,
             createdAt: s.metadata.createdAt,
           })),
+        });
+      } catch (err) {
+        next(err);
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // 11b. POST /feedback  body: {neuronId, query, relevant}
+    //      Online embedding learning — move neuron toward/away from query
+    // ----------------------------------------------------------------
+    api.post('/feedback', async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        this.ensureInitialized();
+
+        const { neuronId, query, relevant } = req.body;
+        if (!neuronId || typeof neuronId !== 'string') {
+          res.status(400).json({ error: 'neuronId (string) is required' });
+          return;
+        }
+        if (!query || typeof query !== 'string' || query.trim().length === 0) {
+          res.status(400).json({ error: 'query must be a non-empty string' });
+          return;
+        }
+        if (typeof relevant !== 'boolean') {
+          res.status(400).json({ error: 'relevant (boolean) is required' });
+          return;
+        }
+
+        const result = await this.queryService.recordFeedback(neuronId, query, relevant);
+        res.json({
+          neuronId: result.neuronId,
+          relevant,
+          embeddingDrift: result.embeddingDrift,
+          feedbackCount: result.feedbackCount,
+          message: relevant
+            ? 'Embedding moved toward query (LTP)'
+            : 'Embedding moved away from query (LTD)',
         });
       } catch (err) {
         next(err);
@@ -969,6 +1050,74 @@ export class CLIDashboardServer {
     // ----------------------------------------------------------------
     api.post('/db/disconnect', (_req: Request, res: Response) => {
       res.json({ disconnected: true });
+    });
+
+    // ----------------------------------------------------------------
+    // 25. POST /prune  body: {minWeight?, minActivations?, dryRun?}
+    //     Synaptic pruning — remove weak/unused synapses
+    // ----------------------------------------------------------------
+    api.post('/prune', async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        this.ensureInitialized();
+        const { minWeight = 0.05, minActivations = 2, dryRun = false } = req.body ?? {};
+
+        // Validate inputs to prevent accidental mass-deletion
+        if (typeof minWeight !== 'number' || isNaN(minWeight) || minWeight < 0 || minWeight > 1) {
+          res.status(400).json({ error: 'minWeight must be a number in [0, 1]' });
+          return;
+        }
+        if (typeof minActivations !== 'number' || !Number.isInteger(minActivations) || minActivations < 0) {
+          res.status(400).json({ error: 'minActivations must be a non-negative integer' });
+          return;
+        }
+
+        const result = await this.graphManager.pruneSynapses({ minWeight, minActivations, dryRun });
+        res.json({
+          dryRun,
+          pruned: result.pruned,
+          remaining: result.remaining,
+          message: dryRun
+            ? `Would prune ${result.pruned} synapses (${result.remaining} remaining)`
+            : `Pruned ${result.pruned} synapses (${result.remaining} remaining)`,
+        });
+      } catch (err) { next(err); }
+    });
+
+    // ----------------------------------------------------------------
+    // 26. GET /working-memory  — current working memory state
+    // ----------------------------------------------------------------
+    api.get('/working-memory', async (_req: Request, res: Response, next: NextFunction) => {
+      try {
+        this.ensureInitialized();
+        const ids = this.queryService.getWorkingMemory();
+        const neurons = await Promise.all(
+          ids.map(id => this.neuronStore.getNeuron(id))
+        );
+        res.json({
+          capacity: 7,
+          count: ids.length,
+          dopamineLevel: this.queryService.getDopamineLevel(),
+          items: neurons
+            .filter(Boolean)
+            .map((n: any) => ({
+              neuronId: n.id,
+              tags: n.metadata.tags,
+              sourceType: n.metadata.sourceType,
+              accessCount: n.metadata.accessCount,
+            })),
+        });
+      } catch (err) { next(err); }
+    });
+
+    // ----------------------------------------------------------------
+    // 27. DELETE /working-memory  — clear working memory
+    // ----------------------------------------------------------------
+    api.delete('/working-memory', (_req: Request, res: Response, next: NextFunction) => {
+      try {
+        this.ensureInitialized();
+        this.queryService.clearWorkingMemory();
+        res.json({ cleared: true, message: 'Working memory and episode buffer cleared' });
+      } catch (err) { next(err); }
     });
 
     // Mount all API routes

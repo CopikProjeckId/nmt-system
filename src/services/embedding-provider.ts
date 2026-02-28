@@ -9,6 +9,7 @@
 
 import { createHash } from 'node:crypto';
 import type { Embedding384 } from '../types/index.js';
+import { parallelChunk } from '../utils/concurrency.js';
 
 /**
  * Embedding provider interface
@@ -80,11 +81,18 @@ export class XenovaEmbeddingProvider implements IEmbeddingProvider {
    */
   async embed(text: string): Promise<Embedding384> {
     const key = createHash('sha256').update(text).digest('hex');
-    if (this.cache.has(key)) return this.cache.get(key)!;
+    if (this.cache.has(key)) {
+      // LRU: move to end on hit (Map preserves insertion order)
+      const cached = this.cache.get(key)!;
+      this.cache.delete(key);
+      this.cache.set(key, cached);
+      return cached;
+    }
 
     const embedding = await this._embed(text);
 
     if (this.cache.size >= this.maxCacheSize) {
+      // Evict least-recently-used (first entry in insertion-order Map)
       const firstKey = this.cache.keys().next().value as string;
       this.cache.delete(firstKey);
     }
@@ -94,49 +102,82 @@ export class XenovaEmbeddingProvider implements IEmbeddingProvider {
 
   /**
    * Internal embedding computation (no cache)
+   * Handles long texts by splitting into overlapping word chunks and mean-pooling.
+   * all-MiniLM-L6-v2 has a 256-token limit (~180 words). Texts exceeding this
+   * are chunked with 50-word overlap and the resulting embeddings are averaged.
    */
   private async _embed(text: string): Promise<Embedding384> {
     const pipe = await getPipeline();
-    const output = await pipe(text, { pooling: 'mean', normalize: true });
 
-    // Convert to Float32Array
-    const embedding = new Float32Array(384);
-    const data = output.data;
+    // Word-level chunking to stay within 256-token limit
+    // ~180 words per chunk (conservative estimate: 1 word ≈ 1.4 tokens)
+    const WORDS_PER_CHUNK = 160;
+    const OVERLAP_WORDS = 40;
+    const words = text.split(/\s+/).filter(w => w.length > 0);
 
-    for (let i = 0; i < 384; i++) {
-      embedding[i] = data[i];
+    if (words.length <= WORDS_PER_CHUNK) {
+      // Short text: embed directly
+      const output = await pipe(text, { pooling: 'mean', normalize: true });
+      const embedding = new Float32Array(384);
+      for (let i = 0; i < 384; i++) {
+        embedding[i] = output.data[i];
+      }
+      return embedding;
     }
 
-    return embedding;
-  }
+    // Long text: chunk with overlap and mean-pool
+    const chunks: string[] = [];
+    for (let start = 0; start < words.length; start += WORDS_PER_CHUNK - OVERLAP_WORDS) {
+      const end = Math.min(start + WORDS_PER_CHUNK, words.length);
+      chunks.push(words.slice(start, end).join(' '));
+      if (end >= words.length) break;
+    }
 
-  /**
-   * Generate embeddings for multiple texts (batched)
-   */
-  async embedBatch(texts: string[]): Promise<Embedding384[]> {
-    const pipe = await getPipeline();
+    // Embed all chunks
+    const chunkEmbeddings: Float32Array[] = [];
+    for (const chunk of chunks) {
+      const output = await pipe(chunk, { pooling: 'mean', normalize: true });
+      const emb = new Float32Array(384);
+      for (let i = 0; i < 384; i++) {
+        emb[i] = output.data[i];
+      }
+      chunkEmbeddings.push(emb);
+    }
 
-    // Process in batches of 32 for memory efficiency
-    const batchSize = 32;
-    const results: Embedding384[] = [];
+    // Mean-pool chunk embeddings
+    const pooled = new Float32Array(384);
+    for (const emb of chunkEmbeddings) {
+      for (let i = 0; i < 384; i++) {
+        pooled[i] += emb[i];
+      }
+    }
+    for (let i = 0; i < 384; i++) {
+      pooled[i] /= chunkEmbeddings.length;
+    }
 
-    for (let i = 0; i < texts.length; i += batchSize) {
-      const batch = texts.slice(i, i + batchSize);
-      const outputs = await pipe(batch, { pooling: 'mean', normalize: true });
-
-      for (let j = 0; j < batch.length; j++) {
-        const embedding = new Float32Array(384);
-        const startIdx = j * 384;
-
-        for (let k = 0; k < 384; k++) {
-          embedding[k] = outputs.data[startIdx + k];
-        }
-
-        results.push(embedding);
+    // Re-normalize to unit vector
+    let norm = 0;
+    for (let i = 0; i < 384; i++) {
+      norm += pooled[i] * pooled[i];
+    }
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+      for (let i = 0; i < 384; i++) {
+        pooled[i] /= norm;
       }
     }
 
-    return results;
+    return pooled;
+  }
+
+  /**
+   * Generate embeddings for multiple texts (batched).
+   * Uses parallelChunk(concurrency=3) — Xenova is CPU-bound on a single pipeline,
+   * so 3 concurrent calls balances throughput without starving the event loop.
+   * Cache hits are served immediately; misses run through the pipeline.
+   */
+  async embedBatch(texts: string[]): Promise<Embedding384[]> {
+    return parallelChunk(texts, 3, t => this.embed(t));
   }
 }
 

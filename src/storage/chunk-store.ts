@@ -70,6 +70,19 @@ export class ChunkStore {
   }
 
   /**
+   * Trigger LevelDB compaction to reclaim disk space after bulk deletes.
+   */
+  async compact(): Promise<void> {
+    if (!this.initialized) return;
+    const db = this.db as any;
+    if (typeof db.compactRange === 'function') {
+      await new Promise<void>((res, rej) =>
+        db.compactRange('\x00', '\xff', {}, (err: Error | null) => err ? rej(err) : res())
+      );
+    }
+  }
+
+  /**
    * Store a chunk (content-addressable)
    * @param chunk - Chunk to store
    * @returns Hash of stored chunk
