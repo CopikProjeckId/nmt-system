@@ -1,25 +1,18 @@
 /**
- * Index Store - HNSW Index Persistence
+ * Index Store - HNSW Index Persistence (SQLite)
  * @module storage/index-store
  */
 
-import { Level } from 'level';
-import type { UUID, HNSWIndexData, HNSWParams } from '../types/index.js';
+import { openDb, closeDb } from './db.js';
+import type { UUID, HNSWParams } from '../types/index.js';
 import { HNSWIndex } from '../core/hnsw-index.js';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import type Database from 'better-sqlite3';
 
-/**
- * Index store options
- */
 export interface IndexStoreOptions {
   dataDir: string;
   autoSaveInterval?: number; // ms, 0 to disable
 }
 
-/**
- * Serialized HNSW format for JSON storage
- */
 interface SerializedHNSW {
   params: HNSWParams;
   entryPoint: UUID | null;
@@ -35,157 +28,94 @@ interface SerializedHNSW {
   }>;
 }
 
-/**
- * HNSW Index Persistence Store
- */
 export class IndexStore {
-  private db: Level<string, string>;
   private dataDir: string;
-  private indexDir: string;
-  private initialized: boolean = false;
+  private db: Database.Database | null = null;
   private autoSaveInterval: number;
   private autoSaveTimer: NodeJS.Timeout | null = null;
   private pendingSaves: Map<string, HNSWIndex> = new Map();
+  private initialized = false;
 
   constructor(options: IndexStoreOptions) {
     this.dataDir = options.dataDir;
-    this.indexDir = path.join(this.dataDir, 'indices');
     this.autoSaveInterval = options.autoSaveInterval ?? 0;
-    this.db = new Level(path.join(this.dataDir, 'index-meta'), {
-      valueEncoding: 'json'
-    });
   }
 
-  /**
-   * Initialize the store
-   */
   async init(): Promise<void> {
     if (this.initialized) return;
-
-    await fs.mkdir(this.indexDir, { recursive: true });
-    await this.db.open();
+    this.db = openDb(this.dataDir);
     this.initialized = true;
 
-    // Start auto-save timer if configured
     if (this.autoSaveInterval > 0) {
       this.autoSaveTimer = setInterval(() => {
-        this.flushPendingSaves();
+        void this.flushPendingSaves();
       }, this.autoSaveInterval);
     }
   }
 
-  /**
-   * Close the store
-   */
   async close(): Promise<void> {
     if (!this.initialized) return;
 
-    // Stop auto-save timer
     if (this.autoSaveTimer) {
       clearInterval(this.autoSaveTimer);
       this.autoSaveTimer = null;
     }
 
-    // Flush pending saves
     await this.flushPendingSaves();
-
-    await this.db.close();
+    closeDb(this.dataDir);
+    this.db = null;
     this.initialized = false;
   }
 
-  /**
-   * Save an HNSW index
-   * @param name - Index name
-   * @param index - HNSW index instance
-   */
   async save(name: string, index: HNSWIndex): Promise<void> {
     this.ensureInitialized();
-
     const serialized = this.serializeIndex(index);
-    const indexPath = this.getIndexPath(name);
+    const data = JSON.stringify(serialized);
+    const now = new Date().toISOString();
 
-    // Write index data to file
-    await fs.writeFile(indexPath, JSON.stringify(serialized, null, 2));
-
-    // Store metadata
-    const metadata = {
-      name,
-      nodeCount: index.size,
-      savedAt: new Date().toISOString(),
-      params: serialized.params
-    };
-    await this.db.put(`index:${name}`, JSON.stringify(metadata));
+    this.db!.prepare(
+      `INSERT OR REPLACE INTO hnsw_indices (name, data, node_count, params, saved_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(name, data, index.size, JSON.stringify(serialized.params), now);
   }
 
-  /**
-   * Queue an index for auto-save
-   * @param name - Index name
-   * @param index - HNSW index instance
-   */
   queueSave(name: string, index: HNSWIndex): void {
     this.pendingSaves.set(name, index);
   }
 
-  /**
-   * Load an HNSW index
-   * @param name - Index name
-   * @returns Loaded index or null if not found
-   */
   async load(name: string): Promise<HNSWIndex | null> {
     this.ensureInitialized();
+    const row = this.db!.prepare(
+      'SELECT data FROM hnsw_indices WHERE name = ?'
+    ).get(name) as { data: string } | undefined;
 
-    const indexPath = this.getIndexPath(name);
+    if (!row) return null;
 
     try {
-      const data = await fs.readFile(indexPath, 'utf-8');
-      const serialized: SerializedHNSW = JSON.parse(data);
+      const serialized: SerializedHNSW = JSON.parse(row.data);
       return this.deserializeIndex(serialized);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return null;
-      }
-      throw err;
+    } catch {
+      return null;
     }
   }
 
-  /**
-   * Check if an index exists
-   * @param name - Index name
-   */
   async exists(name: string): Promise<boolean> {
     this.ensureInitialized();
-
-    try {
-      await fs.access(this.getIndexPath(name));
-      return true;
-    } catch {
-      return false;
-    }
+    const row = this.db!.prepare(
+      'SELECT 1 FROM hnsw_indices WHERE name = ?'
+    ).get(name);
+    return row !== undefined;
   }
 
-  /**
-   * Delete an index
-   * @param name - Index name
-   */
   async delete(name: string): Promise<boolean> {
     this.ensureInitialized();
-
-    try {
-      await fs.unlink(this.getIndexPath(name));
-      await this.db.del(`index:${name}`);
-      this.pendingSaves.delete(name);
-      return true;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return false;
-      }
-      throw err;
-    }
+    const info = this.db!.prepare(
+      'DELETE FROM hnsw_indices WHERE name = ?'
+    ).run(name);
+    this.pendingSaves.delete(name);
+    return info.changes > 0;
   }
 
-  /**
-   * List all saved indices
-   */
   async list(): Promise<Array<{
     name: string;
     nodeCount: number;
@@ -193,27 +123,18 @@ export class IndexStore {
     params: HNSWParams;
   }>> {
     this.ensureInitialized();
+    const rows = this.db!.prepare(
+      'SELECT name, node_count, params, saved_at FROM hnsw_indices ORDER BY saved_at DESC'
+    ).all() as Array<{ name: string; node_count: number; params: string; saved_at: string }>;
 
-    const indices: Array<{
-      name: string;
-      nodeCount: number;
-      savedAt: string;
-      params: HNSWParams;
-    }> = [];
-
-    for await (const [key, value] of this.db.iterator()) {
-      if (key.startsWith('index:')) {
-        indices.push(JSON.parse(value));
-      }
-    }
-
-    return indices;
+    return rows.map(r => ({
+      name: r.name,
+      nodeCount: r.node_count,
+      savedAt: r.saved_at,
+      params: JSON.parse(r.params) as HNSWParams,
+    }));
   }
 
-  /**
-   * Get index metadata
-   * @param name - Index name
-   */
   async getMetadata(name: string): Promise<{
     name: string;
     nodeCount: number;
@@ -221,77 +142,58 @@ export class IndexStore {
     params: HNSWParams;
   } | null> {
     this.ensureInitialized();
+    const row = this.db!.prepare(
+      'SELECT name, node_count, params, saved_at FROM hnsw_indices WHERE name = ?'
+    ).get(name) as { name: string; node_count: number; params: string; saved_at: string } | undefined;
 
-    try {
-      const value = await this.db.get(`index:${name}`);
-      return JSON.parse(value);
-    } catch (err) {
-      if ((err as any).code === 'LEVEL_NOT_FOUND') {
-        return null;
-      }
-      throw err;
-    }
+    if (!row) return null;
+    return {
+      name: row.name,
+      nodeCount: row.node_count,
+      savedAt: row.saved_at,
+      params: JSON.parse(row.params) as HNSWParams,
+    };
   }
 
-  /**
-   * Create a backup of an index
-   * @param name - Index name
-   * @param backupName - Backup name
-   */
   async backup(name: string, backupName?: string): Promise<string> {
     this.ensureInitialized();
+    const row = this.db!.prepare(
+      'SELECT data, node_count, params FROM hnsw_indices WHERE name = ?'
+    ).get(name) as { data: string; node_count: number; params: string } | undefined;
 
-    const indexPath = this.getIndexPath(name);
+    if (!row) throw new Error(`Index '${name}' not found`);
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const actualBackupName = backupName ?? `${name}-backup-${timestamp}`;
-    const backupPath = this.getIndexPath(actualBackupName);
+    const now = new Date().toISOString();
 
-    await fs.copyFile(indexPath, backupPath);
-
-    // Copy metadata
-    const metadata = await this.getMetadata(name);
-    if (metadata) {
-      metadata.name = actualBackupName;
-      await this.db.put(`index:${actualBackupName}`, JSON.stringify(metadata));
-    }
+    this.db!.prepare(
+      `INSERT OR REPLACE INTO hnsw_indices (name, data, node_count, params, saved_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(actualBackupName, row.data, row.node_count, row.params, now);
 
     return actualBackupName;
   }
 
-  /**
-   * Restore an index from backup
-   * @param backupName - Backup name
-   * @param targetName - Target index name (optional, defaults to original)
-   */
   async restore(backupName: string, targetName?: string): Promise<boolean> {
     this.ensureInitialized();
+    const row = this.db!.prepare(
+      'SELECT data, node_count, params FROM hnsw_indices WHERE name = ?'
+    ).get(backupName) as { data: string; node_count: number; params: string } | undefined;
 
-    const backupPath = this.getIndexPath(backupName);
+    if (!row) return false;
+
     const actualTargetName = targetName ?? backupName.replace(/-backup-.*$/, '');
-    const targetPath = this.getIndexPath(actualTargetName);
+    const now = new Date().toISOString();
 
-    try {
-      await fs.copyFile(backupPath, targetPath);
+    this.db!.prepare(
+      `INSERT OR REPLACE INTO hnsw_indices (name, data, node_count, params, saved_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(actualTargetName, row.data, row.node_count, row.params, now);
 
-      const metadata = await this.getMetadata(backupName);
-      if (metadata) {
-        metadata.name = actualTargetName;
-        metadata.savedAt = new Date().toISOString();
-        await this.db.put(`index:${actualTargetName}`, JSON.stringify(metadata));
-      }
-
-      return true;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return false;
-      }
-      throw err;
-    }
+    return true;
   }
 
-  /**
-   * Flush all pending saves
-   */
   private async flushPendingSaves(): Promise<void> {
     const saves = Array.from(this.pendingSaves.entries());
     this.pendingSaves.clear();
@@ -301,18 +203,13 @@ export class IndexStore {
         await this.save(name, index);
       } catch (err) {
         console.error(`Failed to auto-save index ${name}:`, err);
-        // Re-queue for next attempt
         this.pendingSaves.set(name, index);
       }
     }
   }
 
-  /**
-   * Serialize HNSW index for storage
-   */
   private serializeIndex(index: HNSWIndex): SerializedHNSW {
     const data = index.serialize();
-
     return {
       params: data.params,
       entryPoint: data.entryPoint,
@@ -320,18 +217,15 @@ export class IndexStore {
         id: node.id,
         embedding: Array.from(node.embedding),
         layer: node.layer,
-        connections: this.serializeConnections(node.connections)
+        connections: this.serializeConnections(node.connections),
       })),
       layers: data.layers.map(layer => ({
         level: layer.level,
-        nodes: Array.from(layer.nodes)
-      }))
+        nodes: Array.from(layer.nodes),
+      })),
     };
   }
 
-  /**
-   * Deserialize HNSW index from storage
-   */
   private deserializeIndex(data: SerializedHNSW): HNSWIndex {
     const indexData = {
       params: data.params,
@@ -340,20 +234,16 @@ export class IndexStore {
         id: node.id,
         embedding: new Float32Array(node.embedding),
         layer: node.layer,
-        connections: this.deserializeConnections(node.connections)
+        connections: this.deserializeConnections(node.connections),
       })),
       layers: data.layers.map(layer => ({
         level: layer.level,
-        nodes: new Set(layer.nodes)
-      }))
+        nodes: new Set(layer.nodes),
+      })),
     };
-
     return HNSWIndex.deserialize(indexData);
   }
 
-  /**
-   * Serialize connections Map to plain object
-   */
   private serializeConnections(connections: Map<number, Set<UUID>>): Record<string, string[]> {
     const result: Record<string, string[]> = {};
     for (const [layer, conns] of connections) {
@@ -362,9 +252,6 @@ export class IndexStore {
     return result;
   }
 
-  /**
-   * Deserialize connections from plain object to Map
-   */
   private deserializeConnections(data: Record<string, string[]>): Map<number, Set<UUID>> {
     const result = new Map<number, Set<UUID>>();
     for (const [layer, conns] of Object.entries(data)) {
@@ -373,26 +260,13 @@ export class IndexStore {
     return result;
   }
 
-  /**
-   * Get index file path
-   */
-  private getIndexPath(name: string): string {
-    return path.join(this.indexDir, `${name}.json`);
-  }
-
-  /**
-   * Ensure store is initialized
-   */
   private ensureInitialized(): void {
-    if (!this.initialized) {
+    if (!this.initialized || !this.db) {
       throw new Error('IndexStore not initialized. Call init() first.');
     }
   }
 }
 
-/**
- * Create an IndexStore instance
- */
 export function createIndexStore(options: IndexStoreOptions): IndexStore {
   return new IndexStore(options);
 }

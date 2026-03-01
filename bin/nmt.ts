@@ -175,7 +175,6 @@ interface NMTContext {
   syncManager?: any;
   changeJournal?: any;
   eventBus?: any;
-  journalDb?: any;
 }
 
 let _ctx: NMTContext | null = null;
@@ -294,27 +293,17 @@ async function bootstrap(config: Config): Promise<NMTContext> {
   let syncManager: any;
   let changeJournal: any;
   let eventBus: any;
-  let journalDb: any;
 
   try {
     const { EventBus } = await import('../src/events/event-bus.js');
     const { ChangeJournal } = await import('../src/sync/change-journal.js');
     const { StateSyncManager } = await import('../src/sync/state-sync.js');
-    const { Level } = await import('level');
 
     eventBus = new EventBus();
 
-    // Create a separate LevelDB for sync journal
-    const journalDbPath = resolve(config.dataDir, 'journal');
-    if (!existsSync(journalDbPath)) {
-      mkdirSync(journalDbPath, { recursive: true });
-    }
-    journalDb = new Level<string, string>(journalDbPath, { valueEncoding: 'json' });
-    await journalDb.open();
-
     // Generate crypto-safe unique node ID to avoid collisions
     const nodeId = `node-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
-    changeJournal = new ChangeJournal(journalDb, nodeId);
+    changeJournal = new ChangeJournal(config.dataDir, nodeId);
 
     syncManager = new StateSyncManager({
       nodeId,
@@ -336,7 +325,7 @@ async function bootstrap(config: Config): Promise<NMTContext> {
     inferenceEngine, attractorModel, learningSystem,
     neuronManager, embeddingManager,
     // Sync extensions
-    syncManager, changeJournal, eventBus, journalDb,
+    syncManager, changeJournal, eventBus,
   };
 
   return _ctx;
@@ -372,7 +361,7 @@ async function shutdown(): Promise<void> {
   try { await _ctx.chunkStore.close(); } catch { /* ignore */ }
   try { await _ctx.neuronStore.close(); } catch { /* ignore */ }
   try { await _ctx.indexStore.close(); } catch { /* ignore */ }
-  try { if (_ctx.journalDb) await _ctx.journalDb.close(); } catch { /* ignore */ }
+  // journalDb is now SQLite shared connection — closed via closeDb in neuronStore.close()
 
   _ctx = null;
 }

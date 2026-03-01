@@ -3,10 +3,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Level } from 'level';
 import * as fs from 'fs/promises';
 import { StateSyncManager, createStateSyncManager } from '../../src/sync/state-sync.js';
 import { ChangeJournal } from '../../src/sync/change-journal.js';
+import { closeDb } from '../../src/storage/db.js';
 import { VectorClock } from '../../src/sync/vector-clock.js';
 import { MerkleEngine } from '../../src/core/merkle-engine.js';
 import { EventBus } from '../../src/events/event-bus.js';
@@ -34,7 +34,6 @@ async function safeRemoveDir(dir: string, maxRetries = 3): Promise<void> {
 }
 
 describe('StateSyncManager', () => {
-  let db: Level<string, string>;
   let journal: ChangeJournal;
   let merkleEngine: MerkleEngine;
   let eventBus: EventBus;
@@ -45,10 +44,8 @@ describe('StateSyncManager', () => {
     // Clean up any leftover from previous runs
     await safeRemoveDir(testDir);
     await fs.mkdir(testDir, { recursive: true });
-    db = new Level(testDir, { valueEncoding: 'json' });
-    await db.open();
 
-    journal = new ChangeJournal(db, 'node-1');
+    journal = new ChangeJournal(testDir, 'node-1');
     merkleEngine = new MerkleEngine();
     eventBus = new EventBus();
 
@@ -69,7 +66,7 @@ describe('StateSyncManager', () => {
       // Ignore clear errors during cleanup
     }
     try {
-      await db.close();
+      closeDb(testDir);
     } catch {
       // Ignore close errors during cleanup
     }

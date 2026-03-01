@@ -3,10 +3,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { Level } from 'level';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { ChangeJournal, createChangeJournal } from '../../src/sync/change-journal.js';
+import { closeDb } from '../../src/storage/db.js';
 
 /**
  * Safe directory removal with retry for Windows EBUSY errors
@@ -31,7 +31,6 @@ async function safeRemoveDir(dir: string, maxRetries = 3): Promise<void> {
 }
 
 describe('ChangeJournal', () => {
-  let db: Level<string, string>;
   let journal: ChangeJournal;
   const testDir = './test-data/journal-test';
 
@@ -39,9 +38,7 @@ describe('ChangeJournal', () => {
     // Clean up any leftover from previous runs
     await safeRemoveDir(testDir);
     await fs.mkdir(testDir, { recursive: true });
-    db = new Level(testDir, { valueEncoding: 'json' });
-    await db.open();
-    journal = new ChangeJournal(db, 'test-node');
+    journal = new ChangeJournal(testDir, 'test-node');
     await journal.init();
   });
 
@@ -52,7 +49,7 @@ describe('ChangeJournal', () => {
       // Ignore clear errors during cleanup
     }
     try {
-      await db.close();
+      closeDb(testDir);
     } catch {
       // Ignore close errors during cleanup
     }
@@ -419,8 +416,8 @@ describe('ChangeJournal', () => {
         nodeId: 'test-node',
       });
 
-      // Create new journal instance
-      const journal2 = new ChangeJournal(db, 'test-node');
+      // Create new journal instance (same dataDir → same SQLite file)
+      const journal2 = new ChangeJournal(testDir, 'test-node');
       await journal2.init();
 
       const seq = await journal2.getLatestSequence();
@@ -443,7 +440,7 @@ describe('ChangeJournal', () => {
 
   describe('createChangeJournal factory', () => {
     it('should create journal instance', () => {
-      const j = createChangeJournal(db, 'test-node');
+      const j = createChangeJournal(testDir, 'test-node');
       expect(j).toBeInstanceOf(ChangeJournal);
     });
   });

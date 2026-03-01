@@ -1,16 +1,17 @@
 /**
- * Neuron Store - Persistent storage for neurons and synapses
+ * Neuron Store - Persistent storage for neurons and synapses using SQLite
  * @module storage/neuron-store
  */
 
-import { Level } from 'level';
+import Database from 'better-sqlite3';
+import { openDb, closeDb } from './db.js';
 import type {
   UUID,
   NeuronNode,
+  NeuronMetadata,
   Synapse,
   SynapseType,
   Embedding384,
-  NeuronType,
   SourceColumnSchema,
   SourceForeignKey,
   SourceIndex,
@@ -18,8 +19,6 @@ import type {
   SourceTrigger,
 } from '../types/index.js';
 import { generateUUID } from '../utils/uuid.js';
-import * as fs from 'fs/promises';
-import * as path from 'path';
 
 /**
  * Neuron store options
@@ -29,89 +28,51 @@ export interface NeuronStoreOptions {
 }
 
 /**
- * Serialized neuron format for storage
+ * Raw row shape returned by better-sqlite3 for the neurons table
  */
-interface SerializedNeuron {
-  id: UUID;
-  embedding: number[];
-  chunkHashes: string[];
-  merkleRoot: string;
-  metadata: {
-    createdAt: string;
-    updatedAt: string;
-    accessCount: number;
-    lastAccessed: string;
-    sourceType: string;
-    tags: string[];
-    neuronType?: NeuronType;
-    ttl?: number;
-    expiresAt?: number;
-    importance?: number;
-    verifiedAt?: string;
-    sourceRow?: Record<string, unknown>;
-    sourceColumns?: SourceColumnSchema[];
-    sourceForeignKeys?: SourceForeignKey[];
-    sourceIndexes?: SourceIndex[];
-    sourceChecks?: SourceCheckConstraint[];
-    sourceTriggers?: SourceTrigger[];
-    sourceTable?: string;
-    sourceEngine?: string;
-    sourceCharset?: string;
-    sourcePath?: string;
-    sourceName?: string;
-    feedbackCount?: number;
-    embeddingDrift?: number;
-  };
-  outgoingSynapses: UUID[];
-  incomingSynapses: UUID[];
+interface NeuronRow {
+  id: string;
+  merkle_root: string;
+  chunk_hashes: string;
+  embedding: Buffer;
+  metadata: string;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
- * Serialized synapse format for storage
+ * Raw row shape returned by better-sqlite3 for the synapses table
  */
-interface SerializedSynapse {
-  id: UUID;
-  sourceId: UUID;
-  targetId: UUID;
-  type: SynapseType;
+interface SynapseRow {
+  id: string;
+  source_id: string;
+  target_id: string;
+  type: string;
   weight: number;
-  metadata: {
-    createdAt: string;
-    updatedAt: string;
-    activationCount: number;
-    lastActivated: string;
-    bidirectional: boolean;
-  };
+  co_activation_count: number;
+  metadata: string;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
- * Neuron and Synapse Storage
+ * Neuron and Synapse Storage backed by SQLite (better-sqlite3)
  */
 export class NeuronStore {
-  private neuronDb: Level<string, string>;
-  private synapseDb: Level<string, string>;
+  private db!: Database.Database;
   private dataDir: string;
   private initialized: boolean = false;
 
   constructor(options: NeuronStoreOptions) {
     this.dataDir = options.dataDir;
-    this.neuronDb = new Level(path.join(this.dataDir, 'neurons'), {
-      valueEncoding: 'json'
-    });
-    this.synapseDb = new Level(path.join(this.dataDir, 'synapses'), {
-      valueEncoding: 'json'
-    });
   }
 
   /**
-   * Initialize the store
+   * Initialize the store — opens the shared SQLite connection
    */
   async init(): Promise<void> {
     if (this.initialized) return;
-
-    await fs.mkdir(this.dataDir, { recursive: true });
-    await this.neuronDb.open();
-    await this.synapseDb.open();
+    this.db = openDb(this.dataDir);
     this.initialized = true;
   }
 
@@ -120,29 +81,16 @@ export class NeuronStore {
    */
   async close(): Promise<void> {
     if (!this.initialized) return;
-    await this.neuronDb.close();
-    await this.synapseDb.close();
+    closeDb(this.dataDir);
     this.initialized = false;
   }
 
   /**
-   * Trigger LevelDB compaction to reclaim disk space after bulk deletes.
-   * Scans the full key range so LevelDB merges SST files and removes tombstones.
+   * WAL checkpoint to reclaim disk space and truncate the WAL file
    */
   async compact(): Promise<void> {
     if (!this.initialized) return;
-    const db = this.neuronDb as any;
-    const sdb = this.synapseDb as any;
-    if (typeof db.compactRange === 'function') {
-      await new Promise<void>((res, rej) =>
-        db.compactRange('\x00', '\xff', {}, (err: Error | null) => err ? rej(err) : res())
-      );
-    }
-    if (typeof sdb.compactRange === 'function') {
-      await new Promise<void>((res, rej) =>
-        sdb.compactRange('\x00', '\xff', {}, (err: Error | null) => err ? rej(err) : res())
-      );
-    }
+    this.db.pragma('wal_checkpoint(TRUNCATE)');
   }
 
   // ==================== Neuron Operations ====================
@@ -171,49 +119,48 @@ export class NeuronStore {
     this.ensureInitialized();
 
     const now = new Date().toISOString();
+    const id = generateUUID();
+
+    const metadata: NeuronMetadata = {
+      createdAt: now,
+      updatedAt: now,
+      accessCount: 0,
+      lastAccessed: now,
+      sourceType: input.sourceType ?? 'unknown',
+      tags: input.tags ?? [],
+      ...(input.sourceRow !== undefined ? { sourceRow: input.sourceRow } : {}),
+      ...(input.sourceColumns !== undefined ? { sourceColumns: input.sourceColumns } : {}),
+      ...(input.sourceForeignKeys !== undefined ? { sourceForeignKeys: input.sourceForeignKeys } : {}),
+      ...(input.sourceIndexes !== undefined ? { sourceIndexes: input.sourceIndexes } : {}),
+      ...(input.sourceChecks !== undefined ? { sourceChecks: input.sourceChecks } : {}),
+      ...(input.sourceTriggers !== undefined ? { sourceTriggers: input.sourceTriggers } : {}),
+      ...(input.sourceTable !== undefined ? { sourceTable: input.sourceTable } : {}),
+      ...(input.sourceEngine !== undefined ? { sourceEngine: input.sourceEngine } : {}),
+      ...(input.sourceCharset !== undefined ? { sourceCharset: input.sourceCharset } : {}),
+      ...(input.sourcePath !== undefined ? { sourcePath: input.sourcePath } : {}),
+      ...(input.sourceName !== undefined ? { sourceName: input.sourceName } : {}),
+    };
+
     const neuron: NeuronNode = {
-      id: generateUUID(),
+      id,
       embedding: input.embedding,
       chunkHashes: input.chunkHashes,
       merkleRoot: input.merkleRoot,
-      metadata: {
-        createdAt: now,
-        updatedAt: now,
-        accessCount: 0,
-        lastAccessed: now,
-        sourceType: input.sourceType ?? 'unknown',
-        tags: input.tags ?? [],
-        ...(input.sourceRow ? { sourceRow: input.sourceRow } : {}),
-        ...(input.sourceColumns ? { sourceColumns: input.sourceColumns } : {}),
-        ...(input.sourceForeignKeys ? { sourceForeignKeys: input.sourceForeignKeys } : {}),
-        ...(input.sourceIndexes ? { sourceIndexes: input.sourceIndexes } : {}),
-        ...(input.sourceChecks ? { sourceChecks: input.sourceChecks } : {}),
-        ...(input.sourceTriggers ? { sourceTriggers: input.sourceTriggers } : {}),
-        ...(input.sourceTable ? { sourceTable: input.sourceTable } : {}),
-        ...(input.sourceEngine ? { sourceEngine: input.sourceEngine } : {}),
-        ...(input.sourceCharset ? { sourceCharset: input.sourceCharset } : {}),
-        ...(input.sourcePath ? { sourcePath: input.sourcePath } : {}),
-        ...(input.sourceName ? { sourceName: input.sourceName } : {}),
-      },
+      metadata,
       outgoingSynapses: [],
-      incomingSynapses: []
+      incomingSynapses: [],
     };
 
-    await this.putNeuron(neuron);
+    this.insertOrReplaceNeuron(neuron);
     return neuron;
   }
 
   /**
-   * Store a neuron
+   * Upsert a neuron into the database
    */
   async putNeuron(neuron: NeuronNode): Promise<void> {
     this.ensureInitialized();
-
-    const serialized = this.serializeNeuron(neuron);
-    await this.neuronDb.put(`neuron:${neuron.id}`, JSON.stringify(serialized));
-
-    // Index by merkle root for lookup
-    await this.neuronDb.put(`root:${neuron.merkleRoot}`, neuron.id);
+    this.insertOrReplaceNeuron(neuron);
   }
 
   /**
@@ -222,16 +169,12 @@ export class NeuronStore {
   async getNeuron(id: UUID): Promise<NeuronNode | null> {
     this.ensureInitialized();
 
-    try {
-      const value = await this.neuronDb.get(`neuron:${id}`);
-      const serialized: SerializedNeuron = JSON.parse(value);
-      return this.deserializeNeuron(serialized);
-    } catch (err) {
-      if ((err as any).code === 'LEVEL_NOT_FOUND') {
-        return null;
-      }
-      throw err;
-    }
+    const row = this.db
+      .prepare<[string], NeuronRow>('SELECT * FROM neurons WHERE id = ?')
+      .get(id);
+
+    if (!row) return null;
+    return this.rowToNeuron(row);
   }
 
   /**
@@ -240,19 +183,16 @@ export class NeuronStore {
   async getNeuronByMerkleRoot(merkleRoot: string): Promise<NeuronNode | null> {
     this.ensureInitialized();
 
-    try {
-      const id = await this.neuronDb.get(`root:${merkleRoot}`);
-      return this.getNeuron(id);
-    } catch (err) {
-      if ((err as any).code === 'LEVEL_NOT_FOUND') {
-        return null;
-      }
-      throw err;
-    }
+    const row = this.db
+      .prepare<[string], NeuronRow>('SELECT * FROM neurons WHERE merkle_root = ? LIMIT 1')
+      .get(merkleRoot);
+
+    if (!row) return null;
+    return this.rowToNeuron(row);
   }
 
   /**
-   * Update a neuron
+   * Partially update a neuron — merges supplied fields and bumps updatedAt
    */
   async updateNeuron(id: UUID, updates: Partial<NeuronNode>): Promise<NeuronNode | null> {
     this.ensureInitialized();
@@ -263,20 +203,20 @@ export class NeuronStore {
     const updated: NeuronNode = {
       ...neuron,
       ...updates,
-      id: neuron.id, // Preserve ID
+      id: neuron.id, // preserve identity
       metadata: {
         ...neuron.metadata,
         ...updates.metadata,
-        updatedAt: new Date().toISOString()
-      }
+        updatedAt: new Date().toISOString(),
+      },
     };
 
-    await this.putNeuron(updated);
+    this.insertOrReplaceNeuron(updated);
     return updated;
   }
 
   /**
-   * Delete a neuron and its synapses
+   * Delete a neuron and all synapses that reference it
    */
   async deleteNeuron(id: UUID): Promise<boolean> {
     this.ensureInitialized();
@@ -284,25 +224,25 @@ export class NeuronStore {
     const neuron = await this.getNeuron(id);
     if (!neuron) return false;
 
-    // Delete all outgoing synapses
-    for (const synapseId of neuron.outgoingSynapses) {
-      await this.deleteSynapse(synapseId);
+    // Collect all synapse IDs that touch this neuron before deleting them
+    const synapseRows = this.db
+      .prepare<[string, string], { id: string }>(
+        'SELECT id FROM synapses WHERE source_id = ? OR target_id = ?'
+      )
+      .all(id, id);
+
+    // Delete each synapse individually so referencing neurons are updated
+    for (const row of synapseRows) {
+      await this.deleteSynapse(row.id);
     }
 
-    // Delete all incoming synapses
-    for (const synapseId of neuron.incomingSynapses) {
-      await this.deleteSynapse(synapseId);
-    }
-
-    // Delete neuron
-    await this.neuronDb.del(`neuron:${id}`);
-    await this.neuronDb.del(`root:${neuron.merkleRoot}`);
-
+    // Delete the neuron row itself
+    this.db.prepare<[string]>('DELETE FROM neurons WHERE id = ?').run(id);
     return true;
   }
 
   /**
-   * Record an access to a neuron
+   * Increment accessCount and update lastAccessed for a neuron
    */
   async recordAccess(id: UUID): Promise<void> {
     this.ensureInitialized();
@@ -312,44 +252,83 @@ export class NeuronStore {
 
     neuron.metadata.accessCount++;
     neuron.metadata.lastAccessed = new Date().toISOString();
+    neuron.metadata.updatedAt = new Date().toISOString();
 
-    await this.putNeuron(neuron);
+    this.insertOrReplaceNeuron(neuron);
   }
 
   /**
-   * Get all neuron IDs
+   * Return all neuron IDs
    */
   async getAllNeuronIds(): Promise<UUID[]> {
     this.ensureInitialized();
 
-    const ids: UUID[] = [];
-    for await (const key of this.neuronDb.keys()) {
-      if (key.startsWith('neuron:')) {
-        ids.push(key.slice(7));
-      }
-    }
-    return ids;
+    const rows = this.db
+      .prepare<[], { id: string }>('SELECT id FROM neurons')
+      .all();
+
+    return rows.map(r => r.id);
   }
 
   /**
-   * Get neuron count
+   * Return total neuron count
    */
   async getNeuronCount(): Promise<number> {
     this.ensureInitialized();
 
-    let count = 0;
-    for await (const key of this.neuronDb.keys()) {
-      if (key.startsWith('neuron:')) {
-        count++;
+    const row = this.db
+      .prepare<[], { cnt: number }>('SELECT COUNT(*) AS cnt FROM neurons')
+      .get()!;
+
+    return row.cnt;
+  }
+
+  /**
+   * Return all neurons for similarity scoring (HNSW is the primary path;
+   * this is a full-scan fallback used when the index is unavailable)
+   */
+  async findSimilar(embedding: Embedding384, k: number): Promise<NeuronNode[]> {
+    this.ensureInitialized();
+
+    const rows = this.db
+      .prepare<[], NeuronRow>('SELECT * FROM neurons')
+      .all();
+
+    const results: Array<{ neuron: NeuronNode; similarity: number }> = [];
+
+    for (const row of rows) {
+      try {
+        const neuron = this.rowToNeuron(row);
+        const neuronEmbedding = neuron.embedding;
+
+        let dotProduct = 0;
+        let normA = 0;
+        let normB = 0;
+
+        for (let i = 0; i < embedding.length; i++) {
+          dotProduct += embedding[i] * neuronEmbedding[i];
+          normA += embedding[i] * embedding[i];
+          normB += neuronEmbedding[i] * neuronEmbedding[i];
+        }
+
+        const denom = Math.sqrt(normA) * Math.sqrt(normB);
+        const similarity = denom === 0 ? 0 : dotProduct / denom;
+
+        results.push({ neuron, similarity });
+      } catch {
+        // Skip rows with corrupt data
       }
     }
-    return count;
+
+    results.sort((a, b) => b.similarity - a.similarity);
+    return results.slice(0, k).map(r => r.neuron);
   }
 
   // ==================== Synapse Operations ====================
 
   /**
-   * Create a synapse between two neurons
+   * Create a synapse between two neurons.
+   * When bidirectional is true a second reverse synapse is also inserted.
    */
   async createSynapse(
     sourceId: UUID,
@@ -366,6 +345,7 @@ export class NeuronStore {
     if (!source || !target) return null;
 
     const now = new Date().toISOString();
+
     const synapse: Synapse = {
       id: generateUUID(),
       sourceId,
@@ -377,21 +357,12 @@ export class NeuronStore {
         updatedAt: now,
         activationCount: 0,
         lastActivated: now,
-        bidirectional
-      }
+        bidirectional,
+      },
     };
 
-    // Store synapse
-    await this.putSynapse(synapse);
+    this.insertOrReplaceSynapse(synapse);
 
-    // Update neuron connections
-    source.outgoingSynapses.push(synapse.id);
-    target.incomingSynapses.push(synapse.id);
-
-    await this.putNeuron(source);
-    await this.putNeuron(target);
-
-    // Create reverse synapse if bidirectional
     if (bidirectional) {
       const reverseSynapse: Synapse = {
         id: generateUUID(),
@@ -404,33 +375,21 @@ export class NeuronStore {
           updatedAt: now,
           activationCount: 0,
           lastActivated: now,
-          bidirectional: true
-        }
+          bidirectional: true,
+        },
       };
       await this.putSynapse(reverseSynapse);
-
-      target.outgoingSynapses.push(reverseSynapse.id);
-      source.incomingSynapses.push(reverseSynapse.id);
-
-      await this.putNeuron(source);
-      await this.putNeuron(target);
     }
 
     return synapse;
   }
 
   /**
-   * Store a synapse
+   * Upsert a synapse into the database
    */
   async putSynapse(synapse: Synapse): Promise<void> {
     this.ensureInitialized();
-
-    const serialized = this.serializeSynapse(synapse);
-    await this.synapseDb.put(`synapse:${synapse.id}`, JSON.stringify(serialized));
-
-    // Index by source and target
-    await this.synapseDb.put(`source:${synapse.sourceId}:${synapse.id}`, synapse.id);
-    await this.synapseDb.put(`target:${synapse.targetId}:${synapse.id}`, synapse.id);
+    this.insertOrReplaceSynapse(synapse);
   }
 
   /**
@@ -439,64 +398,42 @@ export class NeuronStore {
   async getSynapse(id: UUID): Promise<Synapse | null> {
     this.ensureInitialized();
 
-    try {
-      const value = await this.synapseDb.get(`synapse:${id}`);
-      const serialized: SerializedSynapse = JSON.parse(value);
-      return this.deserializeSynapse(serialized);
-    } catch (err) {
-      if ((err as any).code === 'LEVEL_NOT_FOUND') {
-        return null;
-      }
-      throw err;
-    }
+    const row = this.db
+      .prepare<[string], SynapseRow>('SELECT * FROM synapses WHERE id = ?')
+      .get(id);
+
+    if (!row) return null;
+    return this.rowToSynapse(row);
   }
 
   /**
-   * Get all synapses from a neuron
-   * Optimized: Uses range query instead of full scan - O(k) instead of O(n)
+   * Get all synapses originating from a neuron
    */
   async getOutgoingSynapses(neuronId: UUID): Promise<Synapse[]> {
     this.ensureInitialized();
 
-    const synapses: Synapse[] = [];
-    const prefix = `source:${neuronId}:`;
+    const rows = this.db
+      .prepare<[string], SynapseRow>('SELECT * FROM synapses WHERE source_id = ?')
+      .all(neuronId);
 
-    // Range query: only scan keys with matching prefix
-    for await (const [key] of this.synapseDb.iterator({
-      gte: prefix,
-      lt: prefix + '\xFF'  // '\xFF' is the highest byte, so this covers all keys with prefix
-    })) {
-      const synapseId = key.slice(prefix.length);
-      const synapse = await this.getSynapse(synapseId);
-      if (synapse) synapses.push(synapse);
-    }
-    return synapses;
+    return rows.map(r => this.rowToSynapse(r));
   }
 
   /**
-   * Get all synapses to a neuron
-   * Optimized: Uses range query instead of full scan - O(k) instead of O(n)
+   * Get all synapses targeting a neuron
    */
   async getIncomingSynapses(neuronId: UUID): Promise<Synapse[]> {
     this.ensureInitialized();
 
-    const synapses: Synapse[] = [];
-    const prefix = `target:${neuronId}:`;
+    const rows = this.db
+      .prepare<[string], SynapseRow>('SELECT * FROM synapses WHERE target_id = ?')
+      .all(neuronId);
 
-    // Range query: only scan keys with matching prefix
-    for await (const [key] of this.synapseDb.iterator({
-      gte: prefix,
-      lt: prefix + '\xFF'
-    })) {
-      const synapseId = key.slice(prefix.length);
-      const synapse = await this.getSynapse(synapseId);
-      if (synapse) synapses.push(synapse);
-    }
-    return synapses;
+    return rows.map(r => this.rowToSynapse(r));
   }
 
   /**
-   * Update synapse weight
+   * Update the weight of a synapse
    */
   async updateSynapseWeight(id: UUID, weight: number): Promise<Synapse | null> {
     this.ensureInitialized();
@@ -504,15 +441,16 @@ export class NeuronStore {
     const synapse = await this.getSynapse(id);
     if (!synapse) return null;
 
+    const now = new Date().toISOString();
     synapse.weight = weight;
-    synapse.metadata.updatedAt = new Date().toISOString();
+    synapse.metadata.updatedAt = now;
 
-    await this.putSynapse(synapse);
+    this.insertOrReplaceSynapse(synapse);
     return synapse;
   }
 
   /**
-   * Record synapse activation
+   * Increment activationCount and update lastActivated for a synapse
    */
   async recordSynapseActivation(id: UUID): Promise<void> {
     this.ensureInitialized();
@@ -520,145 +458,137 @@ export class NeuronStore {
     const synapse = await this.getSynapse(id);
     if (!synapse) return;
 
+    const now = new Date().toISOString();
     synapse.metadata.activationCount++;
-    synapse.metadata.lastActivated = new Date().toISOString();
+    synapse.metadata.lastActivated = now;
+    synapse.metadata.updatedAt = now;
 
-    await this.putSynapse(synapse);
+    this.insertOrReplaceSynapse(synapse);
   }
 
   /**
-   * Delete a synapse
+   * Delete a synapse by ID
    */
   async deleteSynapse(id: UUID): Promise<boolean> {
     this.ensureInitialized();
 
-    const synapse = await this.getSynapse(id);
-    if (!synapse) return false;
+    const info = this.db
+      .prepare<[string]>('DELETE FROM synapses WHERE id = ?')
+      .run(id);
 
-    // Remove from indices
-    await this.synapseDb.del(`synapse:${id}`);
-    await this.synapseDb.del(`source:${synapse.sourceId}:${id}`);
-    await this.synapseDb.del(`target:${synapse.targetId}:${id}`);
-
-    // Update neurons
-    const source = await this.getNeuron(synapse.sourceId);
-    const target = await this.getNeuron(synapse.targetId);
-
-    if (source) {
-      source.outgoingSynapses = source.outgoingSynapses.filter(s => s !== id);
-      await this.putNeuron(source);
-    }
-
-    if (target) {
-      target.incomingSynapses = target.incomingSynapses.filter(s => s !== id);
-      await this.putNeuron(target);
-    }
-
-    return true;
+    return info.changes > 0;
   }
 
   /**
-   * Get synapse count
+   * Return total synapse count
    */
   async getSynapseCount(): Promise<number> {
     this.ensureInitialized();
 
-    let count = 0;
-    for await (const key of this.synapseDb.keys()) {
-      if (key.startsWith('synapse:')) {
-        count++;
-      }
-    }
-    return count;
+    const row = this.db
+      .prepare<[], { cnt: number }>('SELECT COUNT(*) AS cnt FROM synapses')
+      .get()!;
+
+    return row.cnt;
+  }
+
+  // ==================== Private Helpers ====================
+
+  /**
+   * INSERT OR REPLACE a neuron row — encodes embedding and metadata
+   */
+  private insertOrReplaceNeuron(neuron: NeuronNode): void {
+    const embeddingBuf = Buffer.from(neuron.embedding.buffer);
+    const now = new Date().toISOString();
+
+    this.db
+      .prepare<[string, string, string, Buffer, string, string, string]>(`
+        INSERT OR REPLACE INTO neurons
+          (id, merkle_root, chunk_hashes, embedding, metadata, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        neuron.id,
+        neuron.merkleRoot,
+        JSON.stringify(neuron.chunkHashes),
+        embeddingBuf,
+        JSON.stringify(neuron.metadata),
+        neuron.metadata.createdAt ?? now,
+        neuron.metadata.updatedAt ?? now
+      );
   }
 
   /**
-   * Find neurons similar to a given embedding
+   * INSERT OR REPLACE a synapse row
    */
-  async findSimilar(embedding: Embedding384, k: number): Promise<NeuronNode[]> {
-    this.ensureInitialized();
+  private insertOrReplaceSynapse(synapse: Synapse): void {
+    const now = new Date().toISOString();
 
-    const results: Array<{ neuron: NeuronNode; similarity: number }> = [];
-
-    for await (const [key, value] of this.neuronDb.iterator()) {
-      if (!key.startsWith('neuron:')) continue;
-
-      try {
-        const serialized = JSON.parse(value) as SerializedNeuron;
-        const neuronEmbedding = new Float32Array(serialized.embedding);
-
-        // Calculate cosine similarity
-        let dotProduct = 0;
-        let normA = 0;
-        let normB = 0;
-
-        for (let i = 0; i < embedding.length; i++) {
-          dotProduct += embedding[i] * neuronEmbedding[i];
-          normA += embedding[i] * embedding[i];
-          normB += neuronEmbedding[i] * neuronEmbedding[i];
-        }
-
-        const similarity = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-
-        results.push({
-          neuron: this.deserializeNeuron(serialized),
-          similarity,
-        });
-      } catch {
-        // Skip invalid entries
-      }
-    }
-
-    // Sort by similarity and return top k
-    results.sort((a, b) => b.similarity - a.similarity);
-    return results.slice(0, k).map(r => r.neuron);
+    this.db
+      .prepare<[string, string, string, string, number, number, string, string, string]>(`
+        INSERT OR REPLACE INTO synapses
+          (id, source_id, target_id, type, weight, co_activation_count, metadata, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        synapse.id,
+        synapse.sourceId,
+        synapse.targetId,
+        synapse.type,
+        synapse.weight,
+        synapse.metadata.activationCount,
+        JSON.stringify(synapse.metadata),
+        synapse.metadata.createdAt ?? now,
+        synapse.metadata.updatedAt ?? now
+      );
   }
 
-  // ==================== Serialization ====================
+  /**
+   * Convert a raw neurons table row into a NeuronNode
+   */
+  private rowToNeuron(row: NeuronRow): NeuronNode {
+    const metadata: NeuronMetadata = JSON.parse(row.metadata);
+    const chunkHashes: string[] = JSON.parse(row.chunk_hashes);
 
-  private serializeNeuron(neuron: NeuronNode): SerializedNeuron {
+    // Buffer → Float32Array (use a copy so the Buffer can be GC'd)
+    const embeddingBuf = Buffer.isBuffer(row.embedding)
+      ? row.embedding
+      : Buffer.from(row.embedding);
+    const embeddingArray = new Float32Array(
+      embeddingBuf.buffer,
+      embeddingBuf.byteOffset,
+      embeddingBuf.byteLength / Float32Array.BYTES_PER_ELEMENT
+    );
+    // Defensive copy — SQLite reuses internal buffers between rows
+    const embedding = new Float32Array(embeddingArray);
+
+    // outgoingSynapses / incomingSynapses are derived from the synapses table
+    // (not stored redundantly in neurons) so we return empty arrays here.
+    // Callers that need populated adjacency lists should call
+    // getOutgoingSynapses / getIncomingSynapses separately.
     return {
-      id: neuron.id,
-      embedding: Array.from(neuron.embedding),
-      chunkHashes: neuron.chunkHashes,
-      merkleRoot: neuron.merkleRoot,
-      metadata: neuron.metadata,
-      outgoingSynapses: neuron.outgoingSynapses,
-      incomingSynapses: neuron.incomingSynapses
+      id: row.id,
+      merkleRoot: row.merkle_root,
+      chunkHashes,
+      embedding,
+      metadata,
+      outgoingSynapses: [],
+      incomingSynapses: [],
     };
   }
 
-  private deserializeNeuron(data: SerializedNeuron): NeuronNode {
+  /**
+   * Convert a raw synapses table row into a Synapse
+   */
+  private rowToSynapse(row: SynapseRow): Synapse {
+    const metadata = JSON.parse(row.metadata);
     return {
-      id: data.id,
-      embedding: new Float32Array(data.embedding),
-      chunkHashes: data.chunkHashes,
-      merkleRoot: data.merkleRoot,
-      metadata: data.metadata,
-      outgoingSynapses: data.outgoingSynapses,
-      incomingSynapses: data.incomingSynapses
-    };
-  }
-
-  private serializeSynapse(synapse: Synapse): SerializedSynapse {
-    return {
-      id: synapse.id,
-      sourceId: synapse.sourceId,
-      targetId: synapse.targetId,
-      type: synapse.type,
-      weight: synapse.weight,
-      metadata: synapse.metadata
-    };
-  }
-
-  private deserializeSynapse(data: SerializedSynapse): Synapse {
-    return {
-      id: data.id,
-      sourceId: data.sourceId,
-      targetId: data.targetId,
-      type: data.type,
-      weight: data.weight,
-      metadata: data.metadata
+      id: row.id,
+      sourceId: row.source_id,
+      targetId: row.target_id,
+      type: row.type as SynapseType,
+      weight: row.weight,
+      metadata,
     };
   }
 

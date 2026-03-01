@@ -1,5 +1,5 @@
 /**
- * Probabilistic Store - Persistent storage for probabilistic ontology modules
+ * Probabilistic Store - Persistent storage for probabilistic ontology modules (SQLite)
  *
  * Handles persistence for:
  * - AttractorModel (미래 끌개)
@@ -10,53 +10,44 @@
  * @module storage/probabilistic-store
  */
 
-import { Level } from 'level';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { openDb, closeDb } from './db.js';
+import type Database from 'better-sqlite3';
 
 export interface ProbabilisticStoreOptions {
   dataDir: string;
 }
 
-/**
- * Unified storage for all probabilistic ontology modules
- */
 export class ProbabilisticStore {
-  private db: Level<string, string>;
   private dataDir: string;
-  private initialized: boolean = false;
+  private db: Database.Database | null = null;
+  private initialized = false;
 
-  // Storage keys
   private static readonly KEYS = {
     ATTRACTORS: 'probabilistic:attractors',
-    LEARNING: 'probabilistic:learning',
-    NEURONS: 'probabilistic:neurons',
+    LEARNING:   'probabilistic:learning',
+    NEURONS:    'probabilistic:neurons',
     DIMENSIONS: 'probabilistic:dimensions',
-    META: 'probabilistic:meta',
+    META:       'probabilistic:meta',
   };
 
   constructor(options: ProbabilisticStoreOptions) {
     this.dataDir = options.dataDir;
-    this.db = new Level(path.join(this.dataDir, 'probabilistic'), {
-      valueEncoding: 'json'
-    });
   }
 
-  /**
-   * Initialize store
-   */
   async init(): Promise<void> {
     if (this.initialized) return;
-
-    await fs.mkdir(this.dataDir, { recursive: true });
-    await this.db.open();
+    this.db = openDb(this.dataDir);
     this.initialized = true;
 
-    // Initialize meta if not exists
-    try {
-      await this.db.get(ProbabilisticStore.KEYS.META);
-    } catch {
-      await this.db.put(ProbabilisticStore.KEYS.META, JSON.stringify({
+    // Initialize meta if not present
+    const existing = this.db.prepare(
+      'SELECT 1 FROM probabilistic WHERE key = ?'
+    ).get(ProbabilisticStore.KEYS.META);
+
+    if (!existing) {
+      this.db.prepare(
+        'INSERT OR IGNORE INTO probabilistic (key, value) VALUES (?, ?)'
+      ).run(ProbabilisticStore.KEYS.META, JSON.stringify({
         version: '1.0.0',
         createdAt: new Date().toISOString(),
         lastUpdated: new Date().toISOString(),
@@ -64,232 +55,149 @@ export class ProbabilisticStore {
     }
   }
 
-  /**
-   * Close store
-   */
   async close(): Promise<void> {
     if (!this.initialized) return;
-    await this.db.close();
+    closeDb(this.dataDir);
+    this.db = null;
     this.initialized = false;
   }
 
-  // ==================== Attractor Storage ====================
+  // ── Helpers ──────────────────────────────────────────────────────────────
 
-  /**
-   * Save attractor model state
-   */
+  private getKey(key: string): object | null {
+    const row = this.db!.prepare(
+      'SELECT value FROM probabilistic WHERE key = ?'
+    ).get(key) as { value: string } | undefined;
+    if (!row) return null;
+    try { return JSON.parse(row.value); } catch { return null; }
+  }
+
+  private putKey(key: string, data: object): void {
+    this.db!.prepare(
+      'INSERT OR REPLACE INTO probabilistic (key, value) VALUES (?, ?)'
+    ).run(key, JSON.stringify({ ...data, savedAt: new Date().toISOString() }));
+    this.updateMeta();
+  }
+
+  private updateMeta(): void {
+    const existing = this.getKey(ProbabilisticStore.KEYS.META) as any ?? {
+      version: '1.0.0', createdAt: new Date().toISOString(),
+    };
+    existing.lastUpdated = new Date().toISOString();
+    this.db!.prepare(
+      'INSERT OR REPLACE INTO probabilistic (key, value) VALUES (?, ?)'
+    ).run(ProbabilisticStore.KEYS.META, JSON.stringify(existing));
+  }
+
+  // ── Attractor ─────────────────────────────────────────────────────────────
+
   async saveAttractors(data: object): Promise<void> {
-    await this.db.put(
-      ProbabilisticStore.KEYS.ATTRACTORS,
-      JSON.stringify({
-        ...data,
-        savedAt: new Date().toISOString(),
-      })
-    );
-    await this.updateMeta();
+    this.putKey(ProbabilisticStore.KEYS.ATTRACTORS, data);
   }
 
-  /**
-   * Load attractor model state
-   */
   async loadAttractors(): Promise<object | null> {
-    try {
-      const data = await this.db.get(ProbabilisticStore.KEYS.ATTRACTORS);
-      return JSON.parse(data);
-    } catch {
-      return null;
-    }
+    return this.getKey(ProbabilisticStore.KEYS.ATTRACTORS);
   }
 
-  // ==================== Learning Storage ====================
+  // ── Learning ──────────────────────────────────────────────────────────────
 
-  /**
-   * Save learning system state
-   */
   async saveLearning(data: object): Promise<void> {
-    await this.db.put(
-      ProbabilisticStore.KEYS.LEARNING,
-      JSON.stringify({
-        ...data,
-        savedAt: new Date().toISOString(),
-      })
-    );
-    await this.updateMeta();
+    this.putKey(ProbabilisticStore.KEYS.LEARNING, data);
   }
 
-  /**
-   * Load learning system state
-   */
   async loadLearning(): Promise<object | null> {
-    try {
-      const data = await this.db.get(ProbabilisticStore.KEYS.LEARNING);
-      return JSON.parse(data);
-    } catch {
-      return null;
-    }
+    return this.getKey(ProbabilisticStore.KEYS.LEARNING);
   }
 
-  // ==================== Probabilistic Neurons Storage ====================
+  // ── Probabilistic Neurons ────────────────────────────────────────────────
 
-  /**
-   * Save probabilistic neurons state
-   */
   async saveNeurons(data: object): Promise<void> {
-    await this.db.put(
-      ProbabilisticStore.KEYS.NEURONS,
-      JSON.stringify({
-        ...data,
-        savedAt: new Date().toISOString(),
-      })
-    );
-    await this.updateMeta();
+    this.putKey(ProbabilisticStore.KEYS.NEURONS, data);
   }
 
-  /**
-   * Load probabilistic neurons state
-   */
   async loadNeurons(): Promise<object | null> {
-    try {
-      const data = await this.db.get(ProbabilisticStore.KEYS.NEURONS);
-      return JSON.parse(data);
-    } catch {
-      return null;
-    }
+    return this.getKey(ProbabilisticStore.KEYS.NEURONS);
   }
 
-  // ==================== Dimensions Storage ====================
+  // ── Dimensions ────────────────────────────────────────────────────────────
 
-  /**
-   * Save dynamic dimensions state
-   */
   async saveDimensions(data: object): Promise<void> {
-    await this.db.put(
-      ProbabilisticStore.KEYS.DIMENSIONS,
-      JSON.stringify({
-        ...data,
-        savedAt: new Date().toISOString(),
-      })
-    );
-    await this.updateMeta();
+    this.putKey(ProbabilisticStore.KEYS.DIMENSIONS, data);
   }
 
-  /**
-   * Load dynamic dimensions state
-   */
   async loadDimensions(): Promise<object | null> {
-    try {
-      const data = await this.db.get(ProbabilisticStore.KEYS.DIMENSIONS);
-      return JSON.parse(data);
-    } catch {
-      return null;
-    }
+    return this.getKey(ProbabilisticStore.KEYS.DIMENSIONS);
   }
 
-  // ==================== Bulk Operations ====================
+  // ── Bulk ─────────────────────────────────────────────────────────────────
 
-  /**
-   * Save all probabilistic module states
-   */
   async saveAll(states: {
     attractors?: object;
     learning?: object;
     neurons?: object;
     dimensions?: object;
   }): Promise<void> {
-    const batch = this.db.batch();
+    const now = new Date().toISOString();
+    const upsert = this.db!.prepare(
+      'INSERT OR REPLACE INTO probabilistic (key, value) VALUES (?, ?)'
+    );
 
-    if (states.attractors) {
-      batch.put(ProbabilisticStore.KEYS.ATTRACTORS, JSON.stringify({
-        ...states.attractors,
-        savedAt: new Date().toISOString(),
-      }));
+    const doUpsert = this.db!.transaction((entries: Array<[string, object]>) => {
+      for (const [key, data] of entries) {
+        upsert.run(key, JSON.stringify({ ...data, savedAt: now }));
+      }
+    });
+
+    const entries: Array<[string, object]> = [];
+    if (states.attractors)  entries.push([ProbabilisticStore.KEYS.ATTRACTORS, states.attractors]);
+    if (states.learning)    entries.push([ProbabilisticStore.KEYS.LEARNING,   states.learning]);
+    if (states.neurons)     entries.push([ProbabilisticStore.KEYS.NEURONS,    states.neurons]);
+    if (states.dimensions)  entries.push([ProbabilisticStore.KEYS.DIMENSIONS, states.dimensions]);
+
+    if (entries.length > 0) {
+      doUpsert(entries);
+      this.updateMeta();
     }
-
-    if (states.learning) {
-      batch.put(ProbabilisticStore.KEYS.LEARNING, JSON.stringify({
-        ...states.learning,
-        savedAt: new Date().toISOString(),
-      }));
-    }
-
-    if (states.neurons) {
-      batch.put(ProbabilisticStore.KEYS.NEURONS, JSON.stringify({
-        ...states.neurons,
-        savedAt: new Date().toISOString(),
-      }));
-    }
-
-    if (states.dimensions) {
-      batch.put(ProbabilisticStore.KEYS.DIMENSIONS, JSON.stringify({
-        ...states.dimensions,
-        savedAt: new Date().toISOString(),
-      }));
-    }
-
-    await batch.write();
-    await this.updateMeta();
   }
 
-  /**
-   * Load all probabilistic module states
-   */
   async loadAll(): Promise<{
     attractors: object | null;
     learning: object | null;
     neurons: object | null;
     dimensions: object | null;
   }> {
-    const [attractors, learning, neurons, dimensions] = await Promise.all([
-      this.loadAttractors(),
-      this.loadLearning(),
-      this.loadNeurons(),
-      this.loadDimensions(),
-    ]);
-
-    return { attractors, learning, neurons, dimensions };
+    return {
+      attractors: this.getKey(ProbabilisticStore.KEYS.ATTRACTORS),
+      learning:   this.getKey(ProbabilisticStore.KEYS.LEARNING),
+      neurons:    this.getKey(ProbabilisticStore.KEYS.NEURONS),
+      dimensions: this.getKey(ProbabilisticStore.KEYS.DIMENSIONS),
+    };
   }
 
-  /**
-   * Clear all probabilistic data
-   */
   async clear(): Promise<void> {
-    const batch = this.db.batch();
-    batch.del(ProbabilisticStore.KEYS.ATTRACTORS);
-    batch.del(ProbabilisticStore.KEYS.LEARNING);
-    batch.del(ProbabilisticStore.KEYS.NEURONS);
-    batch.del(ProbabilisticStore.KEYS.DIMENSIONS);
-    await batch.write();
-    await this.updateMeta();
+    const keys = [
+      ProbabilisticStore.KEYS.ATTRACTORS,
+      ProbabilisticStore.KEYS.LEARNING,
+      ProbabilisticStore.KEYS.NEURONS,
+      ProbabilisticStore.KEYS.DIMENSIONS,
+    ];
+    const del = this.db!.prepare('DELETE FROM probabilistic WHERE key = ?');
+    const doDelete = this.db!.transaction(() => {
+      for (const key of keys) del.run(key);
+    });
+    doDelete();
+    this.updateMeta();
   }
 
-  // ==================== Meta Operations ====================
-
-  private async updateMeta(): Promise<void> {
-    const meta = await this.getMeta();
-    meta.lastUpdated = new Date().toISOString();
-    await this.db.put(ProbabilisticStore.KEYS.META, JSON.stringify(meta));
+  async getMeta(): Promise<{ version: string; createdAt: string; lastUpdated: string }> {
+    const data = this.getKey(ProbabilisticStore.KEYS.META) as any;
+    return data ?? {
+      version: '1.0.0',
+      createdAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
+    };
   }
 
-  async getMeta(): Promise<{
-    version: string;
-    createdAt: string;
-    lastUpdated: string;
-  }> {
-    try {
-      const data = await this.db.get(ProbabilisticStore.KEYS.META);
-      return JSON.parse(data);
-    } catch {
-      return {
-        version: '1.0.0',
-        createdAt: new Date().toISOString(),
-        lastUpdated: new Date().toISOString(),
-      };
-    }
-  }
-
-  /**
-   * Get storage statistics
-   */
   async getStats(): Promise<{
     hasAttractors: boolean;
     hasLearning: boolean;
@@ -298,19 +206,12 @@ export class ProbabilisticStore {
     lastUpdated: string;
   }> {
     const meta = await this.getMeta();
-    const [attractors, learning, neurons, dimensions] = await Promise.all([
-      this.loadAttractors(),
-      this.loadLearning(),
-      this.loadNeurons(),
-      this.loadDimensions(),
-    ]);
-
     return {
-      hasAttractors: attractors !== null,
-      hasLearning: learning !== null,
-      hasNeurons: neurons !== null,
-      hasDimensions: dimensions !== null,
-      lastUpdated: meta.lastUpdated,
+      hasAttractors: this.getKey(ProbabilisticStore.KEYS.ATTRACTORS) !== null,
+      hasLearning:   this.getKey(ProbabilisticStore.KEYS.LEARNING)   !== null,
+      hasNeurons:    this.getKey(ProbabilisticStore.KEYS.NEURONS)     !== null,
+      hasDimensions: this.getKey(ProbabilisticStore.KEYS.DIMENSIONS)  !== null,
+      lastUpdated:   meta.lastUpdated,
     };
   }
 }

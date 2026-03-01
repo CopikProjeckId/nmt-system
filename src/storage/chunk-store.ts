@@ -1,16 +1,19 @@
 /**
  * Chunk Store - Content-Addressable Storage for Chunks
+ * Metadata: SQLite (chunk_metadata table)
+ * Data:     Filesystem at <dataDir>/chunks/<hash[0..1]>/<hash>
  * @module storage/chunk-store
  */
 
-import { Level } from 'level';
+import Database from 'better-sqlite3';
+import { openDb, closeDb } from './db.js';
 import type { Chunk, SHA3Hash } from '../types/index.js';
-import { hash, verifyHash } from '../utils/hash.js';
+import { verifyHash } from '../utils/hash.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
 /**
- * Chunk storage options
+ * Chunk store options
  */
 export interface ChunkStoreOptions {
   dataDir: string;
@@ -18,45 +21,42 @@ export interface ChunkStoreOptions {
 }
 
 /**
- * Chunk metadata stored in LevelDB
+ * Raw row shape returned by better-sqlite3 for the chunk_metadata table
  */
-interface ChunkMetadata {
-  hash: SHA3Hash;
+interface ChunkMetaRow {
+  hash: string;
   size: number;
-  index: number;
+  chunk_index: number;
   offset: number;
-  fingerprint?: number;
-  createdAt: string;
-  refCount: number;
+  fingerprint: number | null;
+  ref_count: number;
+  created_at: string;
 }
 
 /**
  * Content-Addressable Chunk Store
- * Uses LevelDB for metadata and file system for chunk data
+ * Uses SQLite for metadata and the file system for chunk data blobs.
  */
 export class ChunkStore {
-  private db: Level<string, string>;
+  private db!: Database.Database;
   private dataDir: string;
   private chunkDir: string;
   private initialized: boolean = false;
 
   constructor(options: ChunkStoreOptions) {
     this.dataDir = options.dataDir;
-    this.chunkDir = path.join(this.dataDir, 'chunks');
-    this.db = new Level(path.join(this.dataDir, 'chunk-meta'), {
-      valueEncoding: 'json'
-    });
+    this.chunkDir = path.join(options.dataDir, 'chunks');
   }
 
   /**
-   * Initialize the store
+   * Initialize the store — opens the shared SQLite connection and ensures
+   * the chunk data directory exists.
    */
   async init(): Promise<void> {
     if (this.initialized) return;
 
-    // Ensure directories exist
     await fs.mkdir(this.chunkDir, { recursive: true });
-    await this.db.open();
+    this.db = openDb(this.dataDir);
     this.initialized = true;
   }
 
@@ -65,103 +65,99 @@ export class ChunkStore {
    */
   async close(): Promise<void> {
     if (!this.initialized) return;
-    await this.db.close();
+    closeDb(this.dataDir);
     this.initialized = false;
   }
 
   /**
-   * Trigger LevelDB compaction to reclaim disk space after bulk deletes.
+   * WAL checkpoint to reclaim disk space and truncate the WAL file
    */
   async compact(): Promise<void> {
     if (!this.initialized) return;
-    const db = this.db as any;
-    if (typeof db.compactRange === 'function') {
-      await new Promise<void>((res, rej) =>
-        db.compactRange('\x00', '\xff', {}, (err: Error | null) => err ? rej(err) : res())
-      );
-    }
+    this.db.pragma('wal_checkpoint(TRUNCATE)');
   }
 
   /**
-   * Store a chunk (content-addressable)
-   * @param chunk - Chunk to store
-   * @returns Hash of stored chunk
+   * Store a chunk (content-addressable).
+   * If the chunk already exists the ref_count is incremented and no file write
+   * is performed. Otherwise the data is written to disk and a metadata row is
+   * inserted.
    */
   async put(chunk: Chunk): Promise<SHA3Hash> {
     this.ensureInitialized();
 
     const chunkHash = chunk.hash;
 
-    // Check if chunk already exists
-    const existing = await this.getMetadata(chunkHash);
+    const existing = this.getMetaRow(chunkHash);
     if (existing) {
-      // Increment reference count
-      existing.refCount++;
-      await this.db.put(`meta:${chunkHash}`, JSON.stringify(existing));
+      this.db
+        .prepare<[string]>(
+          'UPDATE chunk_metadata SET ref_count = ref_count + 1 WHERE hash = ?'
+        )
+        .run(chunkHash);
       return chunkHash;
     }
 
-    // Store chunk data to file
+    // Write data file first so that a crash before the metadata insert leaves
+    // the system in a state where a subsequent put() retries cleanly.
     const chunkPath = this.getChunkPath(chunkHash);
     await fs.mkdir(path.dirname(chunkPath), { recursive: true });
     await fs.writeFile(chunkPath, chunk.data);
 
-    // Store metadata
-    const metadata: ChunkMetadata = {
-      hash: chunkHash,
-      size: chunk.data.length,
-      index: chunk.index,
-      offset: chunk.offset,
-      fingerprint: chunk.fingerprint,
-      createdAt: new Date().toISOString(),
-      refCount: 1
-    };
-
-    await this.db.put(`meta:${chunkHash}`, JSON.stringify(metadata));
+    this.db
+      .prepare<[string, number, number, number, number | null, string]>(`
+        INSERT INTO chunk_metadata (hash, size, chunk_index, offset, fingerprint, ref_count, created_at)
+        VALUES (?, ?, ?, ?, ?, 1, ?)
+      `)
+      .run(
+        chunkHash,
+        chunk.data.length,
+        chunk.index,
+        chunk.offset,
+        chunk.fingerprint ?? null,
+        new Date().toISOString()
+      );
 
     return chunkHash;
   }
 
   /**
-   * Store multiple chunks
-   * @param chunks - Chunks to store
-   * @returns Array of stored hashes
+   * Store multiple chunks and return their hashes in order.
    */
   async putMany(chunks: Chunk[]): Promise<SHA3Hash[]> {
     const hashes: SHA3Hash[] = [];
     for (const chunk of chunks) {
-      const h = await this.put(chunk);
-      hashes.push(h);
+      hashes.push(await this.put(chunk));
     }
     return hashes;
   }
 
   /**
-   * Retrieve a chunk by hash
-   * @param chunkHash - Hash of chunk to retrieve
-   * @returns Chunk or null if not found
+   * Retrieve a chunk by hash.
+   * Returns null when the metadata row is absent or the data file is missing.
+   * Throws when the file exists but the hash does not match (corruption).
    */
   async get(chunkHash: SHA3Hash): Promise<Chunk | null> {
     this.ensureInitialized();
 
-    const metadata = await this.getMetadata(chunkHash);
-    if (!metadata) return null;
+    const meta = this.getMetaRow(chunkHash);
+    if (!meta) return null;
+
+    const chunkPath = this.getChunkPath(chunkHash);
 
     try {
-      const chunkPath = this.getChunkPath(chunkHash);
       const data = await fs.readFile(chunkPath);
 
-      // Verify integrity
       if (!verifyHash(data, chunkHash)) {
         throw new Error(`Chunk integrity verification failed: ${chunkHash}`);
       }
 
       return {
-        index: metadata.index,
-        offset: metadata.offset,
+        index: meta.chunk_index,
+        offset: meta.offset,
         data: Buffer.from(data),
         hash: chunkHash,
-        fingerprint: metadata.fingerprint
+        fingerprint: meta.fingerprint ?? undefined,
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -172,74 +168,69 @@ export class ChunkStore {
   }
 
   /**
-   * Retrieve multiple chunks by hash
-   * @param hashes - Array of chunk hashes
-   * @returns Array of chunks (in order, null for missing)
+   * Retrieve multiple chunks by hash (in order, null for any that are missing).
    */
   async getMany(hashes: SHA3Hash[]): Promise<(Chunk | null)[]> {
     return Promise.all(hashes.map(h => this.get(h)));
   }
 
   /**
-   * Check if a chunk exists
-   * @param chunkHash - Hash to check
+   * Check whether a chunk exists (metadata row present).
    */
   async has(chunkHash: SHA3Hash): Promise<boolean> {
     this.ensureInitialized();
-    const metadata = await this.getMetadata(chunkHash);
-    return metadata !== null;
+    return this.getMetaRow(chunkHash) !== null;
   }
 
   /**
-   * Delete a chunk (decrements reference count)
-   * @param chunkHash - Hash of chunk to delete
-   * @returns true if chunk was deleted, false if not found
+   * Decrement ref_count. When ref_count reaches zero the data file and
+   * metadata row are both removed. Returns false when the hash is not found.
    */
   async delete(chunkHash: SHA3Hash): Promise<boolean> {
     this.ensureInitialized();
 
-    const metadata = await this.getMetadata(chunkHash);
-    if (!metadata) return false;
+    const meta = this.getMetaRow(chunkHash);
+    if (!meta) return false;
 
-    metadata.refCount--;
-
-    if (metadata.refCount <= 0) {
-      // Actually delete the chunk
+    if (meta.ref_count <= 1) {
+      // Physically remove the data file
       const chunkPath = this.getChunkPath(chunkHash);
       try {
         await fs.unlink(chunkPath);
       } catch (err) {
-        // Ignore if file doesn't exist
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
           throw err;
         }
       }
-      await this.db.del(`meta:${chunkHash}`);
+      this.db
+        .prepare<[string]>('DELETE FROM chunk_metadata WHERE hash = ?')
+        .run(chunkHash);
     } else {
-      // Just update ref count
-      await this.db.put(`meta:${chunkHash}`, JSON.stringify(metadata));
+      this.db
+        .prepare<[string]>(
+          'UPDATE chunk_metadata SET ref_count = ref_count - 1 WHERE hash = ?'
+        )
+        .run(chunkHash);
     }
 
     return true;
   }
 
   /**
-   * Get all chunk hashes
+   * Return all stored chunk hashes.
    */
   async getAllHashes(): Promise<SHA3Hash[]> {
     this.ensureInitialized();
 
-    const hashes: SHA3Hash[] = [];
-    for await (const key of this.db.keys()) {
-      if (key.startsWith('meta:')) {
-        hashes.push(key.slice(5));
-      }
-    }
-    return hashes;
+    const rows = this.db
+      .prepare<[], { hash: string }>('SELECT hash FROM chunk_metadata')
+      .all();
+
+    return rows.map(r => r.hash);
   }
 
   /**
-   * Get storage statistics
+   * Return aggregate storage statistics.
    */
   async getStats(): Promise<{
     totalChunks: number;
@@ -248,26 +239,26 @@ export class ChunkStore {
   }> {
     this.ensureInitialized();
 
-    let totalChunks = 0;
-    let totalSize = 0;
+    const row = this.db
+      .prepare<[], { total_chunks: number; total_size: number }>(`
+        SELECT COUNT(*) AS total_chunks, COALESCE(SUM(size), 0) AS total_size
+        FROM chunk_metadata
+      `)
+      .get()!;
 
-    for await (const [key, value] of this.db.iterator()) {
-      if (key.startsWith('meta:')) {
-        const metadata: ChunkMetadata = JSON.parse(value);
-        totalChunks++;
-        totalSize += metadata.size;
-      }
-    }
+    const totalChunks = row.total_chunks;
+    const totalSize = row.total_size;
 
     return {
       totalChunks,
       totalSize,
-      avgChunkSize: totalChunks > 0 ? Math.round(totalSize / totalChunks) : 0
+      avgChunkSize: totalChunks > 0 ? Math.round(totalSize / totalChunks) : 0,
     };
   }
 
   /**
-   * Verify integrity of all stored chunks
+   * Verify the hash of every stored chunk data file.
+   * Returns counts of valid chunks and lists of corrupted / missing hashes.
    */
   async verifyIntegrity(): Promise<{
     valid: number;
@@ -276,26 +267,26 @@ export class ChunkStore {
   }> {
     this.ensureInitialized();
 
+    const rows = this.db
+      .prepare<[], ChunkMetaRow>('SELECT * FROM chunk_metadata')
+      .all();
+
     let valid = 0;
     const corrupted: SHA3Hash[] = [];
     const missing: SHA3Hash[] = [];
 
-    for await (const [key, value] of this.db.iterator()) {
-      if (!key.startsWith('meta:')) continue;
-
-      const metadata: ChunkMetadata = JSON.parse(value);
-      const chunkPath = this.getChunkPath(metadata.hash);
-
+    for (const row of rows) {
+      const chunkPath = this.getChunkPath(row.hash);
       try {
         const data = await fs.readFile(chunkPath);
-        if (verifyHash(data, metadata.hash)) {
+        if (verifyHash(data, row.hash)) {
           valid++;
         } else {
-          corrupted.push(metadata.hash);
+          corrupted.push(row.hash);
         }
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-          missing.push(metadata.hash);
+          missing.push(row.hash);
         } else {
           throw err;
         }
@@ -306,31 +297,31 @@ export class ChunkStore {
   }
 
   /**
-   * Garbage collect unreferenced chunks
+   * Remove all metadata rows whose ref_count is zero or below and delete
+   * the associated data files. Returns the number of chunks collected.
    */
   async gc(): Promise<number> {
     this.ensureInitialized();
 
-    const toDelete: SHA3Hash[] = [];
+    const rows = this.db
+      .prepare<[], { hash: string }>(
+        'SELECT hash FROM chunk_metadata WHERE ref_count <= 0'
+      )
+      .all();
 
-    for await (const [key, value] of this.db.iterator()) {
-      if (!key.startsWith('meta:')) continue;
-
-      const metadata: ChunkMetadata = JSON.parse(value);
-      if (metadata.refCount <= 0) {
-        toDelete.push(metadata.hash);
-      }
+    for (const row of rows) {
+      await this.delete(row.hash);
     }
 
-    for (const h of toDelete) {
-      await this.delete(h);
-    }
-
-    return toDelete.length;
+    return rows.length;
   }
 
+  // ==================== Private Helpers ====================
+
   /**
-   * Get chunk path from hash (sharded by first 2 chars)
+   * Return the filesystem path for a chunk's data file.
+   * Files are sharded into sub-directories by the first two hex characters
+   * of the hash to avoid excessive entries in a single directory.
    */
   private getChunkPath(chunkHash: SHA3Hash): string {
     const prefix = chunkHash.slice(0, 2);
@@ -338,23 +329,18 @@ export class ChunkStore {
   }
 
   /**
-   * Get chunk metadata
+   * Fetch a single metadata row by hash. Returns null when absent.
    */
-  private async getMetadata(chunkHash: SHA3Hash): Promise<ChunkMetadata | null> {
-    try {
-      const value = await this.db.get(`meta:${chunkHash}`);
-      return JSON.parse(value);
-    } catch (err) {
-      if ((err as any).code === 'LEVEL_NOT_FOUND') {
-        return null;
-      }
-      throw err;
-    }
+  private getMetaRow(chunkHash: SHA3Hash): ChunkMetaRow | null {
+    const row = this.db
+      .prepare<[string], ChunkMetaRow>(
+        'SELECT * FROM chunk_metadata WHERE hash = ?'
+      )
+      .get(chunkHash);
+
+    return row ?? null;
   }
 
-  /**
-   * Ensure store is initialized
-   */
   private ensureInitialized(): void {
     if (!this.initialized) {
       throw new Error('ChunkStore not initialized. Call init() first.');
